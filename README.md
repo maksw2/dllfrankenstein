@@ -1,6 +1,30 @@
-# ffi by me
+# dllfrankenstein – call any DLL function anytime anywhere
 
-i'm terrible at writing readmes, just make a pr
+scary shit
+
+## how 2 use it
+
+to build the app:
+- `cl /c /Zi caller.c`
+- `ml64 /c helper.asm`
+- `link caller.obj helper.obj /debug /out:caller.exe`
+
+to build the test dll:
+- `cl /LD /Zi test.c /link /debug`
+
+### to run it:
+
+normal mode:
+
+- `./caller.exe <dll> <return-type> <func-name>(<arg-type> <arg-value>, ...) [--print-return]`
+
+interactive mode:
+
+- `./caller.exe --interactive`
+- `/loaddll <dll>`
+- `<optional dll name if not in focus> <return-type> <func-name>(<arg-type> <arg-value>, ...)`
+
+## help string
 
 ```
 C:\Users\maksw\Documents\dllfrankenstein>caller
@@ -17,6 +41,9 @@ Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result]
     f32, f64, str, voidptr, void
     equivalent to float, double, null-terminated string, pointer (hex), and void
 ```
+
+## example; creating a win32 window
+
 ```
 C:\Users\maksw\Documents\dllfrankenstein>caller.exe --interactive
 --- Interactive DLL Caller ---
@@ -44,3 +71,30 @@ it all works!
 varargs work too
 > /quit
 ```
+
+## how 2 contribute
+
+- make a pr  
+- bonus points if it doesn’t crash your machine  
+
+## how 2 contact
+
+- maksw@maksw.pl
+
+Q: Why make this?  
+A: Because `rundll32.exe` is too limiting.  
+
+Q: Is this safe?  
+A: As long as the signature is valid. 
+
+Q: Can I use this in production?  
+A: I won't stop you, but don't blame me when you fuck it up.
+
+Q: Does it support all calling conventions?  
+A: It's x86_64 dumbass.
+
+Q: Does it support variable arguments?  
+A: Yes. Look at the example.
+
+Q: Will you add fancy type parsing?  
+A: How about no.
