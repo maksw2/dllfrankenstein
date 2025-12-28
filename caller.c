@@ -1,5 +1,6 @@
 // caller.c
 #include <windows.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,14 @@ typedef enum {
     TYPE_STR, TYPE_VOIDPTR, TYPE_VOID
 } ArgType;
 
+typedef enum {
+    ASSERT_NONE,
+    ASSERT_ZERO,
+    ASSERT_NOT_ZERO,
+    ASSERT_NEGATIVE,
+    ASSERT_NON_NEGATIVE
+} AssertType;
+
 typedef struct {
     ArgType type;
     uint64_t value;
@@ -23,6 +32,7 @@ typedef struct {
     char dll_path[256];
     char func_name[128];
     ArgType return_type;
+    AssertType assert_type;
     Argument args[16];
     int arg_count;
     int print_result;
@@ -197,6 +207,21 @@ void parse_flags(char* f_str, CallSpec* spec) {
         if (strncmp(p, "--print-result", 14) == 0) {
             spec->print_result = 1;
             p += 14;
+        } else if (strncmp(p, "--assert=zero", 13) == 0) {
+            spec->assert_type = ASSERT_ZERO;
+            p += 13;
+        } else if (strncmp(p, "--assert=nonzero", 16) == 0) {
+            spec->assert_type = ASSERT_NOT_ZERO;
+            p += 16;
+        } else if (strncmp(p, "--assert=negative", 16) == 0) {
+            spec->assert_type = ASSERT_NEGATIVE;
+            p += 16;
+        } else if (strncmp(p, "--assert=nonnegative", 20) == 0) {
+            spec->assert_type = ASSERT_NON_NEGATIVE;
+            p += 20;
+        } else if (strncmp(p, "--assert", 8) == 0) {
+            spec->assert_type = ASSERT_ZERO;
+            p += 8;
         } else {
             // Move to next potential flag
             while (*p && *p != ' ' && *p != '\t') p++;
@@ -232,6 +257,141 @@ void process_command(char* input_line) {
     if (strncmp(p, "/quit", 5) == 0) {
         for (int i = 0; i < g_registry_count; i++) FreeLibrary(g_registry[i].handle);
         exit(0);
+    }
+
+    // --- Command: /alloc <size> ---
+    if (strncmp(p, "/alloc", 6) == 0) {
+        p = skip_ws(p + 6);
+        int size = atoi(p);
+        void* ptr = malloc(size);
+        printf("Allocated %d bytes at 0x%p\n", size, ptr);
+        return;
+    }
+
+    // --- Command: /free <ptr> ---
+    if (strncmp(p, "/free", 5) == 0) {
+        p = skip_ws(p + 5);
+        void* ptr = (void*)strtoull(p, NULL, 16);
+        free(ptr);
+        printf("Freed memory at 0x%p\n", ptr);
+        return;
+    }
+
+    // --- Command: /set <addr> <type> <value> ---
+    if (strncmp(p, "/set", 4) == 0) {
+        p = skip_ws(p + 4);
+        char* addr_str = read_token(&p);
+        char* type_str = read_token(&p);
+        char* val_str  = read_token(&p);
+        if (!addr_str || !type_str || !val_str) return;
+
+        uint64_t addr = strtoull(addr_str, NULL, 16);
+        ArgType type = parse_type(type_str);
+        uint64_t value = parse_argument_value(type, val_str);
+
+        switch(type){
+            case TYPE_I8:  *(int8_t*)addr  = (int8_t)value; break;
+            case TYPE_I16: *(int16_t*)addr = (int16_t)value; break;
+            case TYPE_I32: *(int32_t*)addr = (int32_t)value; break;
+            case TYPE_I64: *(int64_t*)addr = (int64_t)value; break;
+            case TYPE_U8:  *(uint8_t*)addr  = (uint8_t)value; break;
+            case TYPE_U16: *(uint16_t*)addr = (uint16_t)value; break;
+            case TYPE_U32: *(uint32_t*)addr = (uint32_t)value; break;
+            case TYPE_U64: *(uint64_t*)addr = (uint64_t)value; break;
+            case TYPE_F32: { float f; memcpy(&f,&value,sizeof(float)); *(float*)addr = f; } break;
+            case TYPE_F64: { double d; memcpy(&d,&value,sizeof(double)); *(double*)addr = d; } break;
+            default: printf("unsupported\n"); break;
+        }
+        free(addr_str); free(type_str); free(val_str);
+        return;
+    }
+
+    // --- Command: /memset <addr> <value> <count> ---
+    if (strncmp(p, "/memset", 7) == 0) {
+        p = skip_ws(p + 7);
+        char* addr_str = read_token(&p);
+        char* val_str = read_token(&p);
+        char* count_str = read_token(&p);
+        if (!addr_str || !val_str || !count_str) return;
+
+        uint64_t addr = strtoull(addr_str, NULL, 16);
+        uint8_t value = (uint8_t)strtoul(val_str, NULL, 10);
+        size_t count = (size_t)strtoul(count_str, NULL, 10);
+
+        memset((void*)addr, value, count);
+        printf("Set %zu bytes at 0x%p to 0x%02x\n", count, (void*)addr, value);
+
+        free(addr_str); free(val_str); free(count_str);
+        return;
+    }
+    
+    // --- Command: /get <addr> <type> ---
+    if (strncmp(p, "/get", 4) == 0) {
+        p = skip_ws(p + 4);
+        char* addr_str = read_token(&p);
+        char* type_str = read_token(&p);
+        if (!addr_str || !type_str) return;
+
+        uint64_t addr = strtoull(addr_str, NULL, 16);
+        ArgType type = parse_type(type_str);
+
+        uint64_t value = 0;
+        switch(type){
+            case TYPE_I8:  value = (uint64_t)*(int8_t*)addr; break;
+            case TYPE_I16: value = (uint64_t)*(int16_t*)addr; break;
+            case TYPE_I32: value = (uint64_t)*(int32_t*)addr; break;
+            case TYPE_I64: value = (uint64_t)*(int64_t*)addr; break;
+            case TYPE_U8:  value = (uint64_t)*(uint8_t*)addr; break;
+            case TYPE_U16: value = (uint64_t)*(uint16_t*)addr; break;
+            case TYPE_U32: value = (uint64_t)*(uint32_t*)addr; break;
+            case TYPE_U64: value = (uint64_t)*(uint64_t*)addr; break;
+            case TYPE_F32: { float f = *(float*)addr; memcpy(&value,&f,sizeof(float)); } break;
+            case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
+            default: printf("unsupported\n"); break;
+        }
+        printf("Value at %p (%s): %llu\n", (void*)addr, type_str, value);
+        free(addr_str); free(type_str);
+        return;
+    }
+
+    // --- Command: /address <dll_path> <name> ---
+    if (strncmp(p, "/address", 8) == 0) {
+        p = skip_ws(p + 8);
+        char* dll_path = read_token(&p);
+        char* name_str = read_token(&p);
+        
+        if (!dll_path || !name_str) {
+            if (dll_path) free(dll_path);
+            if (name_str) free(name_str);
+            return;
+        }
+
+        HMODULE h = find_registered_dll(dll_path, NULL);
+        bool temp_load = false;
+
+        if (!h) {
+            h = LoadLibraryA(dll_path);
+            temp_load = true;
+        }
+
+        if (h) {
+            void* addr = (void*)GetProcAddress(h, name_str);
+            if (addr) {
+                printf("Function '%s' in '%s' is at address: 0x%p\n", name_str, dll_path, addr);
+            } else {
+                printf("Error: Could not find function '%s' in '%s'\n", name_str, dll_path);
+            }
+            
+            if (temp_load) {
+                FreeLibrary(h);
+            }
+        } else {
+            printf("Error: Could not load DLL '%s'\n", dll_path);
+        }
+
+        free(dll_path);
+        free(name_str);
+        return;
     }
 
     // --- Command: /loaddll <path> ---
@@ -338,6 +498,31 @@ void process_command(char* input_line) {
             format_result(result, spec.return_type, buf, sizeof(buf));
             printf("Result: %s\n", buf);
         }
+        if (spec.assert_type != ASSERT_NONE) {
+            bool assert_failed = false;
+            switch (spec.assert_type) {
+                case ASSERT_ZERO:
+                    if (result != 0) assert_failed = true;
+                    break;
+                case ASSERT_NOT_ZERO:
+                    if (result == 0) assert_failed = true;
+                    break;
+                case ASSERT_NEGATIVE:
+                    if ((int64_t)result <= 0) assert_failed = true;
+                    break;
+                case ASSERT_NON_NEGATIVE:
+                    if ((int64_t)result > 0) assert_failed = true;
+                    break;
+                default:
+                    break;
+            }
+            if (assert_failed) {
+                printf("Assertion failed for result: ");
+                char buf[256];
+                format_result(result, spec.return_type, buf, sizeof(buf));
+                printf("%s\n", buf);
+            }
+        }
     }
 
     // Cleanup string arguments
@@ -372,17 +557,25 @@ int main(int argc, char** argv) {
     } else {
         if (argc < 2) {
             printf("wilczurski's cool shit - ffi\n");
-            printf("Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result]\n");
-            printf("   or: caller.exe --interactive\n");
-            printf("   Available commands in interactive mode:\n");
-            printf("     /loaddll <path>       Load and focus a DLL\n");
-            printf("     /freedll <path>      Unload a DLL from registry\n");
-            printf("     /quit                Exit the program\n");
-            printf("    Usage in interactive mode is the same as non-interactive.\n");
+            printf("Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<type>]\n");
+            printf("    <type> can be: zero, nonzero, negative, nonnegative\n");
+            printf("    not specifying defaults to none\n");
+            printf("    or: caller.exe --interactive\n");
+            printf("    Available commands in interactive mode:\n");
+            printf("      /loaddll <path>                     Load and focus a DLL\n");
+            printf("      /freedll <path>                     Unload a DLL from registry\n");
+            printf("      /alloc   <size in bytes>            Allocate memory\n");
+            printf("      /free    <addr>                     Free allocated memory\n");
+            printf("      /set     <addr>     <type>  <value> Store a value at a memory address\n");
+            printf("      /get     <addr>     <type>          Get a value from a memory address\n");
+            printf("      /memset  <addr>     <value> <count> Set a block of memory to a byte value\n");
+            printf("      /address <dll_path> <name>          Get a function pointer by name\n");
+            printf("      /quit                               Exit the program\n");
+            printf("    Usage in interactive mode is the same as non-interactive with the exception of the focused dll, then no need to specify <dll_path>\n");
             printf("    Types: i8, i16, i32, i64, u8, u16, u32, u64\n");
-            printf("    equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t\n");
+            printf("    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t\n");
             printf("    f32, f64, str, voidptr, void\n");
-            printf("    equivalent to float, double, null-terminated string, pointer (hex), and void\n");
+            printf("    Equivalent to float, double, null-terminated string, pointer (hex), and void\n");
             return 1;
         }
 

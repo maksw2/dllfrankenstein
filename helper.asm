@@ -11,7 +11,7 @@ call_dynamic_function PROC
     push rdi
     push r12
     push r13
-    mov  rbp, rsp       ; Set up our frame pointer AFTER pushes
+    mov  rbp, rsp       ; Set up our frame pointer after pushes
     
     ; Now, [rbp] points to the saved r13. 
     ; The stack is currently 8-byte aligned (because we pushed 6 regs + rbp = 7 total).
@@ -116,7 +116,7 @@ do_call:
 
     ; --- Epilogue ---
     mov rsp, rbp        ; Clean up dynamic stack & restore RSP to saved regs
-    pop r13             ; Pop in REVERSE order of pushes
+    pop r13             ; Pop in reverse order of pushes
     pop r12
     pop rdi
     pop rsi
