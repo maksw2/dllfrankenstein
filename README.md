@@ -34,26 +34,32 @@ interactive mode:
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller
-wilczurski's cool shit - ffi
-Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<type>]
-    <type> can be: zero, nonzero, negative, nonnegative
-    not specifying defaults to none
+wilczurski's cool shit - repl + ffi
+Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
     or: caller.exe --interactive
-    Available commands in interactive mode:
-      /loaddll <path>                     Load and focus a DLL
-      /freedll <path>                     Unload a DLL from registry
-      /alloc   <size in bytes>            Allocate memory
-      /free    <addr>                     Free allocated memory
-      /set     <addr>     <type>  <value> Store a value at a memory address
-      /get     <addr>     <type>          Get a value from a memory address
-      /memset  <addr>     <value> <count> Set a block of memory to a byte value
-      /address <dll_path> <name>          Get a function pointer by name
-      /quit                               Exit the program
-    Usage in interactive mode is the same as non-interactive with the exception of the focused dll, then no need to specify <dll_path>
-    Types: i8, i16, i32, i64, u8, u16, u32, u64
-    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t
-    f32, f64, str, voidptr, void
-    Equivalent to float, double, null-terminated string, pointer (hex), and void
+    <type> can be: zero, nonzero, negative, nonnegative
+    not specifying means none
+Usage in interactive mode:
+    /loaddll <path>                     Load and focus a DLL
+    /freedll <path>                     Unload a DLL from registry
+    /alloc   <size>                     Allocate memory. Provide <size> in bytes
+    /free    <addr>                     Free allocated memory
+    /set     <addr>     <type>  <value> Store a value at a memory address
+    /memset  <addr>     <value> [count] Set a block of memory to a byte value
+    /get     <addr>     <type>          Get a value from a memory address
+    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)
+    /address <dll_path> <name>          Get a function pointer by name
+    /quit                               Exit the program
+Variables are Write-Once Read-Many, no shadowing, no scopes.
+    $<name> = <type> <value>            Assign a variable
+    Variables can be used as function arguments, like test.dll void print(str "%d", $var1)
+    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
+Usage in interactive mode is the same as non-interactive except for the focused DLL,
+then you don't need to specify <dll_path>
+Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void
+    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,
+    float, double, null-terminated string, pointer (always hex), and void
+You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.
 ```
 
 ## example; creating a win32 window
@@ -62,28 +68,37 @@ Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<ty
 C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
 --- Interactive DLL Caller ---
 Enter command or /quit to exit.
-> /address user32.dll DefWindowProcA
-Function 'DefWindowProcA' in 'user32.dll' is at address: 0x00007FFCDE461870
-> kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result
-Result: 0x7ff7d8990000
-> /alloc 32
-Allocated 32 bytes at 0x000002BD5ED7A0C0
-> /memset 0x000002BD5ED7A0C0 0
-> /set 0x000002BD5ED7A0C0 str "mywindowclass"
-> /alloc 72
-Allocated 72 bytes at 0x000002BD5ED71DA0
-> /memset 0x000002BD5ED71DA0 0 72
-Set 72 bytes at 0x000002BD5ED71DA0 to 0x00
-> /set 0x000002BD5ED71DA8 voidptr 0x00007FFCDE461870
-> /set 0x000002BD5ED71DB8 voidptr 0x7ff7d8990000
-> /set 0x000002BD5ED71DE0 voidptr 0x000002BD5ED7A0C0
-> user32.dll u16 RegisterClassA(voidptr 0x000002BD5ED71DA0) --print-result --assert=nonzero
-Result: 49904
-> user32.dll voidptr CreateWindowExA(u32 0, str "mywindowclass", str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr 0x7ff7d8990000, voidptr 0) --print-result --assert=nonzero
-Result: 0x420870
-> user32.dll i32 ShowWindow(voidptr 0x420870, i32 5)
-> user32.dll void DestroyWindow(voidptr 0x420870)
-> /quit
+> $lpfnWndProc = /address user32.dll DefWindowProcA
+0x7ffcde461870
+$lpfnWndProc = 0x7ffcde461870
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
+Result: 0x7ff7854b0000
+$hInstance = 0x7ff7854b0000
+> $lpszClassName = /alloc 14
+0x0000024BF4B35180
+$lpszClassName = 0x24bf4b35180
+> /memset $lpszClassName 0 14
+Set 14 bytes at 0x0000024BF4B35180 to 0x00
+> /set $lpszClassName str "mywindowclass"
+Value at 0x0000024BF4B35180 (str): mywindowclass
+> $wc = /alloc 72
+0x0000024BF4B21B20
+$wc = 0x24bf4b21b20
+> /memset $wc 0 72
+Set 72 bytes at 0x0000024BF4B21B20 to 0x00
+> /set $wc+0x08 voidptr $lpfnWndProc
+Value at 0x0000024BF4B21B28 (voidptr): 0x7ffcde461870
+> /set $wc+0x18 voidptr $hInstance
+Value at 0x0000024BF4B21B38 (voidptr): 0x7ff7854b0000
+> /set $wc+0x40 voidptr $lpszClassName
+Value at 0x0000024BF4B21B60 (voidptr): 0x24bf4b35180
+> $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
+Result: 50150
+$class_atom = 0xc3e6
+> $hwnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0x7d0f02
+$hwnd = 0x7d0f02
+> user32.dll i32 ShowWindow(voidptr $hwnd, i32 5)
 ```
 
 ## example; having fun with memory
@@ -101,7 +116,7 @@ Value at 000002061136BF40 (i32): 67
 Freed memory at 000002061136BF40
 > /quit
 
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
 --- Interactive DLL Caller ---
 Enter command or /quit to exit.
 > /alloc 128
@@ -147,26 +162,26 @@ Assertion failed for result: 19
 
 4 spaces, not tabs  
 `if (condition) {`  
-test your changes
-
-- make a pr
-- bonus points if it doesn’t crash
+test your changes  
+make a pr
 
 ## how 2 contact
 
 - maksw@maksw.pl
 
 Q: Why make this?  
-A: Because `rundll32.exe` is too limiting.  
+A: Because `rundll32.exe` is too limiting.
 
 Q: Is this safe?  
-A: As long as the signature is valid. 
+A: As long as the signature is valid.
 
 Q: Can I use this in production?  
 A: No warranty.
 
 Q: Does it support all calling conventions?  
-A: It's x86_64 dumbass.
+A: Technically.
+
+Q: Can I do pointer math? A: Yes, basic arithmetic like $base + 0x40 works.
 
 Q: Does it support variable arguments?  
 A: Yes.

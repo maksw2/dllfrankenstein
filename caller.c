@@ -38,6 +38,131 @@ typedef struct {
     int print_result;
 } CallSpec;
 
+typedef struct {
+    char name[64];
+    uint64_t value;
+    bool is_set;
+} WORMVariable;
+
+WORMVariable g_worm_vars[128];
+int g_worm_var_count = 0;
+
+// Find a WORM variable by name, returns NULL if not found
+WORMVariable* find_worm_var(const char* name) {
+    for (int i = 0; i < g_worm_var_count; i++) {
+        if (strcmp(g_worm_vars[i].name, name) == 0) {
+            return &g_worm_vars[i];
+        }
+    }
+    return NULL;
+}
+
+// Set a WORM variable (only if not already set)
+bool set_worm_var(const char* name, uint64_t value) {
+    WORMVariable* existing = find_worm_var(name);
+    if (existing) {
+        if (existing->is_set) {
+            printf("Error: Variable '%s' is already set\n", name);
+            return false;
+        }
+        existing->value = value;
+        existing->is_set = true;
+        return true;
+    }
+    
+    if (g_worm_var_count >= 128) {
+        printf("Error: Maximum number of variables reached\n");
+        return false;
+    }
+    
+    strncpy(g_worm_vars[g_worm_var_count].name, name, 63);
+    g_worm_vars[g_worm_var_count].name[63] = '\0';
+    g_worm_vars[g_worm_var_count].value = value;
+    g_worm_vars[g_worm_var_count].is_set = true;
+    g_worm_var_count++;
+    return true;
+}
+
+char* skip_ws(char* s) {
+    while(*s==' '||*s=='\t') 
+        s++;
+    return s;
+}
+
+char* skip_ws_backwards(char* str, char* limit) {
+    char* p = str;
+    while (p > limit && isspace((unsigned char)*(p - 1)))
+        p--;
+    return p;
+}
+
+char* expand_worm_vars(const char* input) {
+    char* current_str = _strdup(input);
+    bool changed = true;
+
+    while (changed) {
+        changed = false;
+        char* dollar = strchr(current_str, '$');
+        if (!dollar) break;
+
+        // 1. Extract variable name
+        char* name_start = dollar + 1;
+        char* name_end = name_start;
+        while (*name_end && (isalnum((unsigned char)*name_end) || *name_end == '_')) {
+            name_end++;
+        }
+
+        int name_len = (int)(name_end - name_start);
+        if (name_len == 0) break; 
+
+        char var_name[64];
+        strncpy(var_name, name_start, name_len);
+        var_name[name_len] = '\0';
+
+        WORMVariable* var = find_worm_var(var_name);
+        if (!var) {
+            printf("Error: Variable '$%s' not found\n", var_name);
+            break; 
+        }
+
+        uint64_t final_val = var->value;
+        char* expression_end = name_end;
+
+        // 2. Check for arithmetic suffix (e.g., + 0x08 or - 10)
+        char* p = skip_ws(name_end);
+        if (*p == '+' || *p == '-') {
+            char op = *p;
+            char* num_ptr = skip_ws(p + 1);
+            if (isxdigit((unsigned char)*num_ptr)) {
+                char* endptr;
+                uint64_t offset = strtoull(num_ptr, &endptr, 0);
+                if (op == '+') final_val += offset;
+                else final_val -= offset;
+                expression_end = endptr; // Consume the math part of the string
+            }
+        }
+
+        // 3. Construct the replacement hex string
+        char val_buf[32];
+        sprintf(val_buf, "0x%llx", final_val);
+
+        size_t prefix_len = dollar - current_str;
+        size_t suffix_len = strlen(expression_end);
+        size_t val_len = strlen(val_buf);
+        
+        char* new_str = malloc(prefix_len + val_len + suffix_len + 1);
+        memcpy(new_str, current_str, prefix_len);
+        memcpy(new_str + prefix_len, val_buf, val_len);
+        memcpy(new_str + prefix_len + val_len, expression_end, suffix_len + 1);
+
+        free(current_str);
+        current_str = new_str;
+        changed = true; 
+    }
+
+    return current_str;
+}
+
 // ------------------------ Helpers ------------------------
 ArgType parse_type(const char* str) {
     if(strcmp(str,"i8")==0) return TYPE_I8;
@@ -59,9 +184,9 @@ ArgType parse_type(const char* str) {
 uint64_t parse_argument_value(ArgType type, const char* str) {
     switch(type){
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64:
-            return (uint64_t)atoll(str);
+            return (uint64_t)strtoull(str,NULL,0);
         case TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64:
-            return (uint64_t)strtoull(str,NULL,10);
+            return (uint64_t)strtoull(str,NULL,0);
         case TYPE_F32: {
             float f_val = (float)atof(str); // Parse to float
             double d_val = (double)f_val;   // Promote float to double
@@ -129,8 +254,6 @@ void format_result(uint64_t result, ArgType type, char* buf, size_t size){
 }
 
 // ------------------------ Command line parsing ------------------------
-char* skip_ws(char* s){ while(*s==' '||*s=='\t') s++; return s; }
-
 char* read_token(char** s){
     char* p = skip_ws(*s);
     if(!*p) return NULL;
@@ -249,246 +372,250 @@ HMODULE find_registered_dll(const char* path, int* out_idx) {
     return NULL;
 }
 
-void process_command(char* input_line) {
-    char* p = skip_ws(input_line);
-    if (!*p) return;
+void handle_quit_command() {
+    for (int i = 0; i < g_registry_count; i++) FreeLibrary(g_registry[i].handle);
+    exit(0);
+}
 
-    // --- Command: /quit ---
-    if (strncmp(p, "/quit", 5) == 0) {
-        for (int i = 0; i < g_registry_count; i++) FreeLibrary(g_registry[i].handle);
-        exit(0);
-    }
+uint64_t handle_alloc_command(char* p) {
+    p = skip_ws(p + 6);
+    char* expanded = expand_worm_vars(p);
+    int size = atoi(expanded);
+    void* ptr = malloc(size);
+    printf("0x%p\n", ptr);
+    free(expanded);
+    return (uint64_t)ptr; // Return the address
+}
 
-    // --- Command: /alloc <size> ---
-    if (strncmp(p, "/alloc", 6) == 0) {
-        p = skip_ws(p + 6);
-        int size = atoi(p);
-        void* ptr = malloc(size);
-        printf("Allocated %d bytes at 0x%p\n", size, ptr);
+void handle_free_command(char* p) {
+    p = skip_ws(p + 5);
+    char* expanded = expand_worm_vars(p);
+    void* ptr = (void*)strtoull(expanded, NULL, 16);
+    free(ptr);
+    printf("Freed memory at 0x%p\n", ptr);
+    free(expanded);
+}
+
+void handle_set_command(char* p) {
+    p = skip_ws(p + 4);
+    char* expanded = expand_worm_vars(p);
+    char* work_p = expanded;
+    
+    char* addr_str = read_token(&work_p);
+    char* type_str = read_token(&work_p);
+    char* val_str  = read_token(&work_p);
+    if (!addr_str || !type_str || !val_str) {
+        free(expanded);
         return;
     }
 
-    // --- Command: /free <ptr> ---
-    if (strncmp(p, "/free", 5) == 0) {
-        p = skip_ws(p + 5);
-        void* ptr = (void*)strtoull(p, NULL, 16);
-        free(ptr);
-        printf("Freed memory at 0x%p\n", ptr);
-        return;
-    }
+    uint64_t addr = strtoull(addr_str, NULL, 16);
+    ArgType type = parse_type(type_str);
+    uint64_t value = parse_argument_value(type, val_str);
 
-    // --- Command: /set <addr> <type> <value> ---
-    if (strncmp(p, "/set", 4) == 0) {
-        p = skip_ws(p + 4);
-        char* addr_str = read_token(&p);
-        char* type_str = read_token(&p);
-        char* val_str  = read_token(&p);
-        if (!addr_str || !type_str || !val_str) return;
-
-        uint64_t addr = strtoull(addr_str, NULL, 16);
-        ArgType type = parse_type(type_str);
-        uint64_t value = parse_argument_value(type, val_str);
-
-        switch(type){
-            case TYPE_I8:  *(int8_t*)addr  = (int8_t)value; break;
-            case TYPE_I16: *(int16_t*)addr = (int16_t)value; break;
-            case TYPE_I32: *(int32_t*)addr = (int32_t)value; break;
-            case TYPE_I64: *(int64_t*)addr = (int64_t)value; break;
-            case TYPE_U8:  *(uint8_t*)addr  = (uint8_t)value; break;
-            case TYPE_U16: *(uint16_t*)addr = (uint16_t)value; break;
-            case TYPE_U32: *(uint32_t*)addr = (uint32_t)value; break;
-            case TYPE_U64: *(uint64_t*)addr = (uint64_t)value; break;
-            case TYPE_F32: { float f; memcpy(&f,&value,sizeof(float)); *(float*)addr = f; } break;
-            case TYPE_F64: { double d; memcpy(&d,&value,sizeof(double)); *(double*)addr = d; } break;
-            case TYPE_STR: 
-                // Copy the actual characters into the buffer at 'addr'
-                if (value != 0) {
-                    strcpy((char*)addr, (char*)value); 
-                }
-                break;
-            case TYPE_VOIDPTR: *(uint64_t*)addr = value; break;
-            default: printf("unsupported\n"); break;
-        }
-        char res_buf[256];
-        format_result(value, type, res_buf, sizeof(res_buf));
-        printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
-        free(addr_str); free(type_str); free(val_str);
-        return;
-    }
-
-    // --- Command: /memset <addr> <value> <count> ---
-    if (strncmp(p, "/memset", 7) == 0) {
-        p = skip_ws(p + 7);
-        char* addr_str = read_token(&p);
-        char* val_str = read_token(&p);
-        char* count_str = read_token(&p);
-        if (!addr_str || !val_str || !count_str) return;
-
-        uint64_t addr = strtoull(addr_str, NULL, 16);
-        uint8_t value = (uint8_t)strtoul(val_str, NULL, 10);
-        size_t count = (size_t)strtoul(count_str, NULL, 10);
-
-        memset((void*)addr, value, count);
-        printf("Set %zu bytes at 0x%p to 0x%02x\n", count, (void*)addr, value);
-
-        free(addr_str); free(val_str); free(count_str);
-        return;
+    switch(type){
+        case TYPE_I8:  *(int8_t*)addr  = (int8_t)value; break;
+        case TYPE_I16: *(int16_t*)addr = (int16_t)value; break;
+        case TYPE_I32: *(int32_t*)addr = (int32_t)value; break;
+        case TYPE_I64: *(int64_t*)addr = (int64_t)value; break;
+        case TYPE_U8:  *(uint8_t*)addr  = (uint8_t)value; break;
+        case TYPE_U16: *(uint16_t*)addr = (uint16_t)value; break;
+        case TYPE_U32: *(uint32_t*)addr = (uint32_t)value; break;
+        case TYPE_U64: *(uint64_t*)addr = (uint64_t)value; break;
+        case TYPE_F32: { float f; memcpy(&f,&value,sizeof(float)); *(float*)addr = f; } break;
+        case TYPE_F64: { double d; memcpy(&d,&value,sizeof(double)); *(double*)addr = d; } break;
+        case TYPE_STR: 
+            if (value != 0) strcpy((char*)addr, (char*)value);
+            break;
+        case TYPE_VOIDPTR: *(uint64_t*)addr = value; break;
+        default: printf("unsupported\n"); break;
     }
     
-    // --- Command: /get <addr> <type> ---
-    if (strncmp(p, "/get", 4) == 0) {
-        p = skip_ws(p + 4);
-        char* addr_str = read_token(&p);
-        char* type_str = read_token(&p);
-        if (!addr_str || !type_str) return;
+    char res_buf[256];
+    format_result(value, type, res_buf, sizeof(res_buf));
+    printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
+    
+    free(addr_str); free(type_str); free(val_str);
+    free(expanded);
+}
 
-        uint64_t addr = strtoull(addr_str, NULL, 16);
-        ArgType type = parse_type(type_str);
-
-        uint64_t value = 0;
-        switch(type){
-            case TYPE_I8:  value = (uint64_t)*(int8_t*)addr; break;
-            case TYPE_I16: value = (uint64_t)*(int16_t*)addr; break;
-            case TYPE_I32: value = (uint64_t)*(int32_t*)addr; break;
-            case TYPE_I64: value = (uint64_t)*(int64_t*)addr; break;
-            case TYPE_U8:  value = (uint64_t)*(uint8_t*)addr; break;
-            case TYPE_U16: value = (uint64_t)*(uint16_t*)addr; break;
-            case TYPE_U32: value = (uint64_t)*(uint32_t*)addr; break;
-            case TYPE_U64: value = (uint64_t)*(uint64_t*)addr; break;
-            case TYPE_F32: { float f = *(float*)addr; memcpy(&value,&f,sizeof(float)); } break;
-            case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
-            case TYPE_STR: 
-                // The address itself is where the string starts
-                value = addr; 
-                break;
-            case TYPE_VOIDPTR: value = *(uint64_t*)addr; break;
-            default: printf("unsupported\n"); break;
-        }
-        char res_buf[256];
-        format_result(value, type, res_buf, sizeof(res_buf));
-        printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
-        free(addr_str); free(type_str);
+void handle_memset_command(char* p) {
+    p = skip_ws(p + 7);
+    char* expanded = expand_worm_vars(p);
+    char* work_p = expanded;
+    
+    char* addr_str = read_token(&work_p);
+    char* val_str = read_token(&work_p);
+    char* count_str = read_token(&work_p);
+    if (!addr_str || !val_str || !count_str) {
+        free(expanded);
         return;
     }
 
-    // --- Command: /hex <addr> <count> ---
-    if (strncmp(p, "/hex", 4) == 0) {
-        p = skip_ws(p + 4);
-        char* addr_str = read_token(&p);
-        char* count_str = read_token(&p);
-        if (!addr_str) return;
+    uint64_t addr = strtoull(addr_str, NULL, 16);
+    uint8_t value = (uint8_t)strtoul(val_str, NULL, 10);
+    size_t count = (size_t)strtoul(count_str, NULL, 10);
 
-        uint64_t addr = strtoull(addr_str, NULL, 16);
-        int count = count_str ? atoi(count_str) : 64; // Default to 64 bytes
-        if (count <= 0) count = 16;
+    memset((void*)addr, value, count);
+    printf("Set %zu bytes at 0x%p to 0x%02x\n", count, (void*)addr, value);
 
-        unsigned char* data = (unsigned char*)addr;
-        
-        printf("Dump of 0x%p (%d bytes):\n", data, count);
-        for (int i = 0; i < count; i += 16) {
-            printf("  %p: ", data + i);
-            
-            // Print hex
-            for (int j = 0; j < 16; j++) {
-                if (i + j < count)
-                    printf("%02X ", data[i + j]);
-                else
-                    printf("   ");
-            }
-            
-            // Print ASCII
-            printf(" |");
-            for (int j = 0; j < 16; j++) {
-                if (i + j < count) {
-                    unsigned char c = data[i + j];
-                    printf("%c", (c >= 32 && c <= 126) ? c : '.');
-                }
-            }
-            printf("|\n");
-        }
+    free(addr_str); free(val_str); free(count_str);
+    free(expanded);
+}
 
-        free(addr_str); if(count_str) free(count_str);
+uint64_t handle_get_command(char* p) {
+    p = skip_ws(p + 4);
+    char* expanded = expand_worm_vars(p);
+    char* work_p = expanded;
+    
+    char* addr_str = read_token(&work_p);
+    char* type_str = read_token(&work_p);
+    if (!addr_str || !type_str) {
+        free(expanded);
+        return 0;
+    }
+
+    uint64_t addr = strtoull(addr_str, NULL, 16);
+    ArgType type = parse_type(type_str);
+
+    uint64_t value = 0;
+    switch(type){
+        case TYPE_I8:  value = (uint64_t)*(int8_t*)addr; break;
+        case TYPE_I16: value = (uint64_t)*(int16_t*)addr; break;
+        case TYPE_I32: value = (uint64_t)*(int32_t*)addr; break;
+        case TYPE_I64: value = (uint64_t)*(int64_t*)addr; break;
+        case TYPE_U8:  value = (uint64_t)*(uint8_t*)addr; break;
+        case TYPE_U16: value = (uint64_t)*(uint16_t*)addr; break;
+        case TYPE_U32: value = (uint64_t)*(uint32_t*)addr; break;
+        case TYPE_U64: value = (uint64_t)*(uint64_t*)addr; break;
+        case TYPE_F32: { float f = *(float*)addr; memcpy(&value,&f,sizeof(float)); } break;
+        case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
+        case TYPE_STR: value = addr; break;
+        case TYPE_VOIDPTR: value = *(uint64_t*)addr; break;
+        default: printf("unsupported\n"); break;
+    }
+    
+    char res_buf[256];
+    format_result(value, type, res_buf, sizeof(res_buf));
+    printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
+    
+    free(addr_str); free(type_str); free(expanded);
+    return value;
+}
+
+void handle_hex_command(char* p) {
+    p = skip_ws(p + 4);
+    char* expanded = expand_worm_vars(p);
+    char* work_p = expanded;
+    
+    char* addr_str = read_token(&work_p);
+    char* count_str = read_token(&work_p);
+    if (!addr_str) {
+        free(expanded);
         return;
     }
 
-    // --- Command: /address <dll_path> <name> ---
-    if (strncmp(p, "/address", 8) == 0) {
-        p = skip_ws(p + 8);
-        char* dll_path = read_token(&p);
-        char* name_str = read_token(&p);
-        
-        if (!dll_path || !name_str) {
-            if (dll_path) free(dll_path);
-            if (name_str) free(name_str);
-            return;
-        }
+    uint64_t addr = strtoull(addr_str, NULL, 16);
+    int count = count_str ? atoi(count_str) : 64;
+    if (count <= 0) count = 16;
 
+    unsigned char* data = (unsigned char*)addr;
+    
+    printf("Dump of 0x%p (%d bytes):\n", data, count);
+    for (int i = 0; i < count; i += 16) {
+        printf("  %p: ", data + i);
+        
+        for (int j = 0; j < 16; j++) {
+            if (i + j < count)
+                printf("%02X ", data[i + j]);
+            else
+                printf("   ");
+        }
+        
+        printf(" |");
+        for (int j = 0; j < 16; j++) {
+            if (i + j < count) {
+                unsigned char c = data[i + j];
+                printf("%c", (c >= 32 && c <= 126) ? c : '.');
+            }
+        }
+        printf("|\n");
+    }
+
+    free(addr_str); 
+    if(count_str) free(count_str);
+    free(expanded);
+}
+
+uint64_t handle_address_command(char* p) {
+    p = skip_ws(p + 8);
+    char* expanded = expand_worm_vars(p);
+    char* work_p = expanded;
+    char* dll_path = read_token(&work_p);
+    char* name_str = read_token(&work_p);
+    
+    uint64_t result_addr = 0;
+    if (dll_path && name_str) {
         HMODULE h = find_registered_dll(dll_path, NULL);
         bool temp_load = false;
-
-        if (!h) {
-            h = LoadLibraryA(dll_path);
-            temp_load = true;
-        }
+        if (!h) { h = LoadLibraryA(dll_path); temp_load = true; }
 
         if (h) {
-            void* addr = (void*)GetProcAddress(h, name_str);
-            if (addr) {
-                printf("Function '%s' in '%s' is at address: 0x%p\n", name_str, dll_path, addr);
-            } else {
-                printf("Error: Could not find function '%s' in '%s'\n", name_str, dll_path);
-            }
-            
-            if (temp_load) {
-                FreeLibrary(h);
-            }
+            result_addr = (uint64_t)GetProcAddress(h, name_str);
+            if (result_addr) printf("0x%llx\n", result_addr);
+            if (temp_load) FreeLibrary(h);
+        }
+    }
+
+    free(dll_path); free(name_str); free(expanded);
+    return result_addr;
+}
+
+void handle_loaddll_command(char* p) {
+    p = skip_ws(p + 8);
+    char* expanded = expand_worm_vars(p);
+    
+    if (find_registered_dll(expanded, &g_focus_idx)) {
+        printf("DLL '%s' is already loaded (Focus set).\n", expanded);
+    } else if (g_registry_count < 32) {
+        HMODULE h = LoadLibraryA(expanded);
+        if (h) {
+            strncpy(g_registry[g_registry_count].path, expanded, 255);
+            g_registry[g_registry_count].handle = h;
+            g_focus_idx = g_registry_count;
+            g_registry_count++;
+            printf("Loaded and registered: %s (Focus set)\n", expanded);
         } else {
-            printf("Error: Could not load DLL '%s'\n", dll_path);
+            printf("Error: Could not load '%s' (Error: %lu)\n", expanded, GetLastError());
         }
-
-        free(dll_path);
-        free(name_str);
-        return;
     }
+    
+    free(expanded);
+}
 
-    // --- Command: /loaddll <path> ---
-    if (strncmp(p, "/loaddll", 8) == 0) {
-        p = skip_ws(p + 8);
-        if (find_registered_dll(p, &g_focus_idx)) {
-            printf("DLL '%s' is already loaded (Focus set).\n", p);
-        } else if (g_registry_count < 32) {
-            HMODULE h = LoadLibraryA(p);
-            if (h) {
-                strncpy(g_registry[g_registry_count].path, p, 255);
-                g_registry[g_registry_count].handle = h;
-                g_focus_idx = g_registry_count;
-                g_registry_count++;
-                printf("Loaded and registered: %s (Focus set)\n", p);
-            } else {
-                printf("Error: Could not load '%s' (Error: %lu)\n", p, GetLastError());
-            }
-        }
-        return;
+void handle_freedll_command(char* p) {
+    p = skip_ws(p + 8);
+    char* expanded = expand_worm_vars(p);
+    
+    int idx = -1;
+    if (find_registered_dll(expanded, &idx)) {
+        FreeLibrary(g_registry[idx].handle);
+        for (int i = idx; i < g_registry_count - 1; i++) g_registry[i] = g_registry[i+1];
+        g_registry_count--;
+        g_focus_idx = (g_registry_count > 0) ? 0 : -1;
+        printf("Unloaded: %s\n", expanded);
+    } else {
+        printf("DLL '%s' not found in registry.\n", expanded);
     }
+    
+    free(expanded);
+}
 
-    // --- Command: /freedll <path> ---
-    if (strncmp(p, "/freedll", 8) == 0) {
-        p = skip_ws(p + 8);
-        int idx = -1;
-        if (find_registered_dll(p, &idx)) {
-            FreeLibrary(g_registry[idx].handle);
-            // Shift registry down
-            for (int i = idx; i < g_registry_count - 1; i++) g_registry[i] = g_registry[i+1];
-            g_registry_count--;
-            g_focus_idx = (g_registry_count > 0) ? 0 : -1;
-            printf("Unloaded: %s\n", p);
-        } else {
-            printf("DLL '%s' not found in registry.\n", p);
-        }
-        return;
-    }
+uint64_t handle_function_call(char* input_line) {
+    char* p = input_line;
+    char* expanded = expand_worm_vars(p);
+    p = expanded;
 
-    // --- Execution Logic ---
     CallSpec spec = {0};
     char* flags_ptr = NULL;
     int in_quotes = 0;
@@ -501,91 +628,157 @@ void process_command(char* input_line) {
     HMODULE target_dll = NULL;
     char first_token[256];
     
-    // Peek at the first token to see if it's a DLL path or a return type
     char* temp_p = p;
     char* token = read_token(&temp_p);
-    if (!token) return;
+    if (!token) {
+        free(expanded);
+        return 0;
+    }
     strncpy(first_token, token, 255);
     free(token);
 
-    // If first_token contains ".dll", it's a manual DLL call
     if (strstr(first_token, ".dll") != NULL) {
         target_dll = find_registered_dll(first_token, NULL);
         if (!target_dll) {
-            target_dll = LoadLibraryA(first_token); // Temp load if not in registry
+            target_dll = LoadLibraryA(first_token);
             if (!target_dll) {
                 printf("Error: Failed to load %s\n", first_token);
-                return;
+                free(expanded);
+                return 0;
             }
         }
-        p = temp_p; // Advance past the DLL name
+        p = temp_p;
     } else {
-        // Shorthand: use the focused DLL
         if (g_focus_idx != -1) {
             target_dll = g_registry[g_focus_idx].handle;
         } else {
             printf("Error: No DLL focused. Use /loaddll or specify <name>.dll\n");
-            return;
+            free(expanded);
+            return 0;
         }
     }
 
-    // Parse Header (ret_type func_name)
     char ret_type_str[32];
     if (!parse_header(&p, ret_type_str, spec.func_name)) {
         printf("Error: Signature parse failed\n");
-        return;
+        free(expanded);
+        return 0;
     }
     spec.return_type = parse_type(ret_type_str);
     parse_arguments(&p, &spec);
 
-    // Call Function
     void* func_ptr = (void*)GetProcAddress(target_dll, spec.func_name);
     if (!func_ptr) {
         printf("Error: Function '%s' not found.\n", spec.func_name);
-    } else {
-        uint64_t args[16] = {0};
-        uint32_t float_mask = 0;
+
         for (int j = 0; j < spec.arg_count; j++) {
-            args[j] = spec.args[j].value;
-            if (spec.args[j].type == TYPE_F32 || spec.args[j].type == TYPE_F64) float_mask |= (1 << j);
+            if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
         }
-        uint64_t result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
-        if (spec.print_result && spec.return_type != TYPE_VOID) {
+        
+        free(expanded);
+        return 0;
+    }
+
+    uint64_t args[16] = {0};
+    uint32_t float_mask = 0;
+    for (int j = 0; j < spec.arg_count; j++) {
+        args[j] = spec.args[j].value;
+        if (spec.args[j].type == TYPE_F32 || spec.args[j].type == TYPE_F64) float_mask |= (1 << j);
+    }
+    uint64_t result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
+    
+    if (spec.print_result && spec.return_type != TYPE_VOID) {
+        char buf[256];
+        format_result(result, spec.return_type, buf, sizeof(buf));
+        printf("Result: %s\n", buf);
+    }
+    
+    if (spec.assert_type != ASSERT_NONE) {
+        bool assert_failed = false;
+        switch (spec.assert_type) {
+            case ASSERT_ZERO: if (result != 0) assert_failed = true; break;
+            case ASSERT_NOT_ZERO: if (result == 0) assert_failed = true; break;
+            case ASSERT_NEGATIVE: if ((int64_t)result >= 0) assert_failed = true; break;
+            case ASSERT_NON_NEGATIVE: if ((int64_t)result < 0) assert_failed = true; break;
+            default: break;
+        }
+        if (assert_failed) {
+            printf("Assertion failed for result: ");
             char buf[256];
             format_result(result, spec.return_type, buf, sizeof(buf));
-            printf("Result: %s\n", buf);
-        }
-        if (spec.assert_type != ASSERT_NONE) {
-            bool assert_failed = false;
-            switch (spec.assert_type) {
-                case ASSERT_ZERO:
-                    if (result != 0) assert_failed = true;
-                    break;
-                case ASSERT_NOT_ZERO:
-                    if (result == 0) assert_failed = true;
-                    break;
-                case ASSERT_NEGATIVE:
-                    if ((int64_t)result <= 0) assert_failed = true;
-                    break;
-                case ASSERT_NON_NEGATIVE:
-                    if ((int64_t)result > 0) assert_failed = true;
-                    break;
-                default:
-                    break;
-            }
-            if (assert_failed) {
-                printf("Assertion failed for result: ");
-                char buf[256];
-                format_result(result, spec.return_type, buf, sizeof(buf));
-                printf("%s\n", buf);
-            }
+            printf("%s\n", buf);
         }
     }
 
-    // Cleanup string arguments
     for (int j = 0; j < spec.arg_count; j++) {
         if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
     }
+    
+    free(expanded);
+    
+    if (spec.return_type != TYPE_VOID) return result;
+    return 0;
+}
+
+uint64_t process_command(char* input_line) {
+    char* p = skip_ws(input_line);
+    if (!*p) return 0;
+
+    // 1. Handle Variable Assignment ($a = ...)
+    if (*p == '$') {
+        char* eq_ptr = strchr(p, '=');
+        if (eq_ptr) {
+            char var_name[64] = {0};
+            char* name_start = p + 1;
+            char* name_end = skip_ws_backwards(eq_ptr, name_start);
+            size_t name_len = (size_t)(name_end - name_start);
+            if (name_len > 63) name_len = 63;
+            memcpy(var_name, name_start, name_len);
+            var_name[name_len] = '\0';
+
+            // Recursive call for the Right-Hand Side
+            uint64_t result = process_command(skip_ws(eq_ptr + 1));
+            
+            if (set_worm_var(var_name, result)) {
+                printf("$%s = 0x%llx\n", var_name, result);
+            }
+            return result;
+        }
+    }
+
+    // Command dispatch
+    if (*p == '/') {
+        if (strncmp(p, "/quit", 5) == 0)    { handle_quit_command(); return 0; }
+        else if (strncmp(p, "/alloc", 6) == 0)   { return handle_alloc_command(p); }
+        else if (strncmp(p, "/free", 5) == 0)    { handle_free_command(p); return 0; }
+        else if (strncmp(p, "/set", 4) == 0)     { handle_set_command(p); return 0; }
+        else if (strncmp(p, "/memset", 7) == 0)  { handle_memset_command(p); return 0; }
+        else if (strncmp(p, "/get", 4) == 0)     { return handle_get_command(p); }
+        else if (strncmp(p, "/hex", 4) == 0)     { handle_hex_command(p); return 0; }
+        else if (strncmp(p, "/address", 8) == 0) { return handle_address_command(p); }
+        else if (strncmp(p, "/loaddll", 8) == 0) { handle_loaddll_command(p); return 0; }
+    }
+
+    char* temp_p = p;
+    char* first_token = read_token(&temp_p);
+    if (first_token) {
+        ArgType t = parse_type(first_token);
+        
+        // Only enter if there is a value
+        if (t != TYPE_VOID) { 
+            char* val_str = read_token(&temp_p);
+            if (val_str) {
+                uint64_t result = parse_argument_value(t, val_str);
+                free(val_str);
+                free(first_token);
+                return result; 
+            }
+        }
+        free(first_token);
+    }
+    
+    // Default: treat as function call
+    return handle_function_call(input_line);
 }
 
 int main(int argc, char** argv) {
@@ -613,27 +806,34 @@ int main(int argc, char** argv) {
         }
     } else {
         if (argc < 2) {
-            printf("wilczurski's cool shit - ffi\n");
-            printf("Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<type>]\n");
-            printf("    <type> can be: zero, nonzero, negative, nonnegative\n");
-            printf("    not specifying defaults to none\n");
-            printf("    or: caller.exe --interactive\n");
-            printf("    Available commands in interactive mode:\n");
-            printf("      /loaddll <path>                     Load and focus a DLL\n");
-            printf("      /freedll <path>                     Unload a DLL from registry\n");
-            printf("      /alloc   <size in bytes>            Allocate memory\n");
-            printf("      /free    <addr>                     Free allocated memory\n");
-            printf("      /set     <addr>     <type>  <value> Store a value at a memory address\n");
-            printf("      /memset  <addr>     <value> [count] Set a block of memory to a byte value\n");
-            printf("      /get     <addr>     <type>          Get a value from a memory address\n");
-            printf("      /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n");
-            printf("      /address <dll_path> <name>          Get a function pointer by name\n");
-            printf("      /quit                               Exit the program\n");
-            printf("    Usage in interactive mode is the same as non-interactive with the exception of the focused dll, then no need to specify <dll_path>\n");
-            printf("    Types: i8, i16, i32, i64, u8, u16, u32, u64\n");
-            printf("    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t\n");
-            printf("    f32, f64, str, voidptr, void\n");
-            printf("    Equivalent to float, double, null-terminated string, pointer (hex), and void\n");
+            printf(
+                "wilczurski's cool shit - repl + ffi\n"
+                "Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
+                "    or: caller.exe --interactive\n"
+                "    <type> can be: zero, nonzero, negative, nonnegative\n"
+                "    not specifying means none\n"
+                "Usage in interactive mode:\n"
+                "    /loaddll <path>                     Load and focus a DLL\n"
+                "    /freedll <path>                     Unload a DLL from registry\n"
+                "    /alloc   <size>                     Allocate memory. Provide <size> in bytes\n"
+                "    /free    <addr>                     Free allocated memory\n"
+                "    /set     <addr>     <type>  <value> Store a value at a memory address\n"
+                "    /memset  <addr>     <value> [count] Set a block of memory to a byte value\n"
+                "    /get     <addr>     <type>          Get a value from a memory address\n"
+                "    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n"
+                "    /address <dll_path> <name>          Get a function pointer by name\n"
+                "    /quit                               Exit the program\n"
+                "Variables are Write-Once Read-Many, no shadowing, no scopes.\n"
+                "    $<name> = <type> <value>            Assign a variable\n"
+                "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", $var1)\n"
+                "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
+                "Usage in interactive mode is the same as non-interactive except for the focused DLL,\n"
+                "then you don't need to specify <dll_path>\n"
+                "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void\n"
+                "    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,\n"
+                "    float, double, null-terminated string, pointer (always hex), and void\n"
+                "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.\n"
+            );
             return 1;
         }
 
