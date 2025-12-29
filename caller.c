@@ -42,26 +42,29 @@ typedef struct {
     char name[64];
     uint64_t value;
     bool is_set;
-} WORMVariable;
+} Variable;
 
-WORMVariable g_worm_vars[128];
-int g_worm_var_count = 0;
+Variable g_vars[128];
+int g_var_count = 0;
 
-// Find a WORM variable by name, returns NULL if not found
-WORMVariable* find_worm_var(const char* name) {
-    for (int i = 0; i < g_worm_var_count; i++) {
-        if (strcmp(g_worm_vars[i].name, name) == 0) {
-            return &g_worm_vars[i];
+bool interactive = false;
+bool normal_vars = false;
+
+// Find a variable by name, returns NULL if not found
+Variable* find_var(const char* name) {
+    for (int i = 0; i < g_var_count; i++) {
+        if (strcmp(g_vars[i].name, name) == 0) {
+            return &g_vars[i];
         }
     }
     return NULL;
 }
 
-// Set a WORM variable (only if not already set)
-bool set_worm_var(const char* name, uint64_t value) {
-    WORMVariable* existing = find_worm_var(name);
+// Set a variable (only if not already set)
+bool set_var(const char* name, uint64_t value) {
+    Variable* existing = find_var(name);
     if (existing) {
-        if (existing->is_set) {
+        if (existing->is_set && !normal_vars) {
             printf("Error: Variable '%s' is already set\n", name);
             return false;
         }
@@ -70,16 +73,16 @@ bool set_worm_var(const char* name, uint64_t value) {
         return true;
     }
     
-    if (g_worm_var_count >= 128) {
+    if (g_var_count >= 128) {
         printf("Error: Maximum number of variables reached\n");
         return false;
     }
     
-    strncpy(g_worm_vars[g_worm_var_count].name, name, 63);
-    g_worm_vars[g_worm_var_count].name[63] = '\0';
-    g_worm_vars[g_worm_var_count].value = value;
-    g_worm_vars[g_worm_var_count].is_set = true;
-    g_worm_var_count++;
+    strncpy(g_vars[g_var_count].name, name, 63);
+    g_vars[g_var_count].name[63] = '\0';
+    g_vars[g_var_count].value = value;
+    g_vars[g_var_count].is_set = true;
+    g_var_count++;
     return true;
 }
 
@@ -96,7 +99,7 @@ char* skip_ws_backwards(char* str, char* limit) {
     return p;
 }
 
-char* expand_worm_vars(const char* input) {
+char* expand_vars(const char* input) {
     char* current_str = _strdup(input);
     bool changed = true;
 
@@ -119,7 +122,7 @@ char* expand_worm_vars(const char* input) {
         strncpy(var_name, name_start, name_len);
         var_name[name_len] = '\0';
 
-        WORMVariable* var = find_worm_var(var_name);
+        Variable* var = find_var(var_name);
         if (!var) {
             printf("Error: Variable '$%s' not found\n", var_name);
             break; 
@@ -144,7 +147,7 @@ char* expand_worm_vars(const char* input) {
 
         // 3. Construct the replacement hex string
         char val_buf[32];
-        sprintf(val_buf, "0x%llx", final_val);
+        sprintf(val_buf, "0x%llX", final_val);
 
         size_t prefix_len = dollar - current_str;
         size_t suffix_len = strlen(expression_end);
@@ -184,7 +187,7 @@ ArgType parse_type(const char* str) {
 uint64_t parse_argument_value(ArgType type, const char* str) {
     switch(type){
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64:
-            return (uint64_t)strtoull(str,NULL,0);
+            return (uint64_t)strtoll(str,NULL,0);
         case TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64:
             return (uint64_t)strtoull(str,NULL,0);
         case TYPE_F32: {
@@ -230,7 +233,7 @@ uint64_t parse_argument_value(ArgType type, const char* str) {
             dest[j] = '\0';
             return (uint64_t)dest;
         }
-        case TYPE_VOIDPTR: return (uint64_t)strtoull(str,NULL,16);
+        case TYPE_VOIDPTR: return strtoull(str,NULL,16);
         default: return 0;
     }
 }
@@ -248,7 +251,7 @@ void format_result(uint64_t result, ArgType type, char* buf, size_t size){
         case TYPE_F32: { float f; memcpy(&f,&result,sizeof(float)); snprintf(buf,size,"%f",f); break; }
         case TYPE_F64: { double d; memcpy(&d,&result,sizeof(double)); snprintf(buf,size,"%f",d); break; }
         case TYPE_STR: snprintf(buf,size,"%s",(char*)result); break;
-        case TYPE_VOIDPTR: snprintf(buf,size,"0x%llx",result); break;
+        case TYPE_VOIDPTR: snprintf(buf,size,"0x%llX",result); break;
         case TYPE_VOID: snprintf(buf,size,"(void)"); break;
     }
 }
@@ -379,26 +382,26 @@ void handle_quit_command() {
 
 uint64_t handle_alloc_command(char* p) {
     p = skip_ws(p + 6);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     int size = atoi(expanded);
     void* ptr = malloc(size);
-    printf("0x%p\n", ptr);
+    printf("0x%llX\n", (uint64_t)ptr);
     free(expanded);
     return (uint64_t)ptr; // Return the address
 }
 
 void handle_free_command(char* p) {
     p = skip_ws(p + 5);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     void* ptr = (void*)strtoull(expanded, NULL, 16);
     free(ptr);
-    printf("Freed memory at 0x%p\n", ptr);
+    printf("Freed memory at 0x%llX\n", (uint64_t)ptr);
     free(expanded);
 }
 
 void handle_set_command(char* p) {
     p = skip_ws(p + 4);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     char* work_p = expanded;
     
     char* addr_str = read_token(&work_p);
@@ -433,7 +436,7 @@ void handle_set_command(char* p) {
     
     char res_buf[256];
     format_result(value, type, res_buf, sizeof(res_buf));
-    printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
+    printf("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
     
     free(addr_str); free(type_str); free(val_str);
     free(expanded);
@@ -441,7 +444,7 @@ void handle_set_command(char* p) {
 
 void handle_memset_command(char* p) {
     p = skip_ws(p + 7);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     char* work_p = expanded;
     
     char* addr_str = read_token(&work_p);
@@ -457,7 +460,7 @@ void handle_memset_command(char* p) {
     size_t count = (size_t)strtoul(count_str, NULL, 10);
 
     memset((void*)addr, value, count);
-    printf("Set %zu bytes at 0x%p to 0x%02x\n", count, (void*)addr, value);
+    printf("Set %zu bytes at 0x%llX to 0x%02x\n", count, addr, value);
 
     free(addr_str); free(val_str); free(count_str);
     free(expanded);
@@ -465,7 +468,7 @@ void handle_memset_command(char* p) {
 
 uint64_t handle_get_command(char* p) {
     p = skip_ws(p + 4);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     char* work_p = expanded;
     
     char* addr_str = read_token(&work_p);
@@ -497,7 +500,7 @@ uint64_t handle_get_command(char* p) {
     
     char res_buf[256];
     format_result(value, type, res_buf, sizeof(res_buf));
-    printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
+    printf("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
     
     free(addr_str); free(type_str); free(expanded);
     return value;
@@ -505,7 +508,7 @@ uint64_t handle_get_command(char* p) {
 
 void handle_hex_command(char* p) {
     p = skip_ws(p + 4);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     char* work_p = expanded;
     
     char* addr_str = read_token(&work_p);
@@ -521,9 +524,9 @@ void handle_hex_command(char* p) {
 
     unsigned char* data = (unsigned char*)addr;
     
-    printf("Dump of 0x%p (%d bytes):\n", data, count);
+    printf("Dump of 0x%llX (%d bytes):\n", (uint64_t)data, count);
     for (int i = 0; i < count; i += 16) {
-        printf("  %p: ", data + i);
+        printf("  %llX: ", (uint64_t)(data + i));
         
         for (int j = 0; j < 16; j++) {
             if (i + j < count)
@@ -549,7 +552,7 @@ void handle_hex_command(char* p) {
 
 uint64_t handle_address_command(char* p) {
     p = skip_ws(p + 8);
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     char* work_p = expanded;
     char* dll_path = read_token(&work_p);
     char* name_str = read_token(&work_p);
@@ -562,7 +565,7 @@ uint64_t handle_address_command(char* p) {
 
         if (h) {
             result_addr = (uint64_t)GetProcAddress(h, name_str);
-            if (result_addr) printf("0x%llx\n", result_addr);
+            if (result_addr) printf("0x%llX\n", result_addr);
             if (temp_load) FreeLibrary(h);
         }
     }
@@ -573,8 +576,8 @@ uint64_t handle_address_command(char* p) {
 
 void handle_loaddll_command(char* p) {
     p = skip_ws(p + 8);
-    char* expanded = expand_worm_vars(p);
-    
+    char* expanded = expand_vars(p);
+
     if (find_registered_dll(expanded, &g_focus_idx)) {
         printf("DLL '%s' is already loaded (Focus set).\n", expanded);
     } else if (g_registry_count < 32) {
@@ -595,8 +598,8 @@ void handle_loaddll_command(char* p) {
 
 void handle_freedll_command(char* p) {
     p = skip_ws(p + 8);
-    char* expanded = expand_worm_vars(p);
-    
+    char* expanded = expand_vars(p);
+
     int idx = -1;
     if (find_registered_dll(expanded, &idx)) {
         FreeLibrary(g_registry[idx].handle);
@@ -613,7 +616,7 @@ void handle_freedll_command(char* p) {
 
 uint64_t handle_function_call(char* input_line) {
     char* p = input_line;
-    char* expanded = expand_worm_vars(p);
+    char* expanded = expand_vars(p);
     p = expanded;
 
     CallSpec spec = {0};
@@ -707,6 +710,9 @@ uint64_t handle_function_call(char* input_line) {
             char buf[256];
             format_result(result, spec.return_type, buf, sizeof(buf));
             printf("%s\n", buf);
+
+            if (!interactive)
+                exit(1);
         }
     }
 
@@ -738,9 +744,9 @@ uint64_t process_command(char* input_line) {
 
             // Recursive call for the Right-Hand Side
             uint64_t result = process_command(skip_ws(eq_ptr + 1));
-            
-            if (set_worm_var(var_name, result)) {
-                printf("$%s = 0x%llx\n", var_name, result);
+
+            if (set_var(var_name, result)) {
+                printf("$%s = 0x%llX\n", var_name, result);
             }
             return result;
         }
@@ -782,13 +788,24 @@ uint64_t process_command(char* input_line) {
 }
 
 int main(int argc, char** argv) {
-    int interactive = 0;
-    
-    // Check if the user wants interactive mode
-    for(int i = 1; i < argc; i++) {
-        if(strcmp(argv[i], "--interactive") == 0) {
-            interactive = 1;
-            break;
+    const char* script_file = NULL;
+
+    // Parse command-line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--interactive") == 0) {
+            interactive = true;
+            if (i + 1 < argc && strcmp(argv[i + 1], "--normal-variables-pretty-please") == 0) {
+                normal_vars = true;
+                i++;
+            }
+        } else if (strcmp(argv[i], "--script") == 0) {
+            if (i + 1 < argc) {
+                script_file = argv[i + 1];
+                i++;
+            } else {
+                fprintf(stderr, "Error: --script requires a file path.\n");
+                return 1;
+            }
         }
     }
 
@@ -799,19 +816,50 @@ int main(int argc, char** argv) {
         while (1) {
             printf("> ");
             if (!fgets(line, sizeof(line), stdin)) break;
-            
-            // Remove newline
-            line[strcspn(line, "\n")] = 0;
+            line[strcspn(line, "\n")] = 0; // remove newline
             process_command(line);
         }
+    } else if (script_file) {
+        FILE* f = fopen(script_file, "r");
+        if (!f) {
+            fprintf(stderr, "Failed to open script file: %s\n", script_file);
+            return 1;
+        }
+
+        // 1. Determine file size
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        // 2. Allocate memory and read the entire file
+        char *content = malloc(fsize + 1);
+        if (!content) {
+            fprintf(stderr, "Memory allocation failed\n");
+            fclose(f);
+            return 1;
+        }
+        fread(content, 1, fsize, f);
+        content[fsize] = 0; // Null-terminate
+        fclose(f);
+
+        // 3. Process commands from the buffer
+        char *line = strtok(content, "\n");
+        while (line != NULL) {
+            // line is already null-terminated at the newline by strtok
+            printf("> %s\n", line);
+            process_command(line);
+            line = strtok(NULL, "\n");
+        }
+
+        free(content);
     } else {
         if (argc < 2) {
             printf(
                 "wilczurski's cool shit - repl + ffi\n"
                 "Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
-                "    or: caller.exe --interactive\n"
-                "    <type> can be: zero, nonzero, negative, nonnegative\n"
-                "    not specifying means none\n"
+                "    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>\n"
+                "    Scripts by default use .ffi\n"
+                "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
                 "Usage in interactive mode:\n"
                 "    /loaddll <path>                     Load and focus a DLL\n"
                 "    /freedll <path>                     Unload a DLL from registry\n"
@@ -823,8 +871,10 @@ int main(int argc, char** argv) {
                 "    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n"
                 "    /address <dll_path> <name>          Get a function pointer by name\n"
                 "    /quit                               Exit the program\n"
-                "Variables are Write-Once Read-Many, no shadowing, no scopes.\n"
+                "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
+                "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
                 "    $<name> = <type> <value>            Assign a variable\n"
+                "    $<name> = rhs                       Function call or command\n"
                 "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", $var1)\n"
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
                 "Usage in interactive mode is the same as non-interactive except for the focused DLL,\n"
@@ -838,8 +888,7 @@ int main(int argc, char** argv) {
         }
 
         // Reconstruct the command line excluding the program name for the parser
-        char* cmdline_raw = GetCommandLineA();
-        char* p = cmdline_raw;
+        char* p = GetCommandLineA();
         
         // Skip exe name
         if (*p == '"') {

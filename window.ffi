@@ -1,0 +1,15 @@
+$lpfnWndProc = /address user32.dll DefWindowProcA
+$hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
+$lpszClassName = /alloc 14
+/memset $lpszClassName 0 14
+/set $lpszClassName str "mywindowclass"
+$wc = /alloc 72
+/memset $wc 0 72
+/set $wc+0x08 voidptr $lpfnWndProc
+/set $wc+0x18 voidptr $hInstance
+/set $wc+0x40 voidptr $lpszClassName
+$class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
+$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
+kernel32.dll void Sleep(i32 4000)
+user32.dll i32 DestroyWindow(voidptr $hWnd) --assert=nonzero

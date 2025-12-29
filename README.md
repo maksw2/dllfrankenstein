@@ -22,13 +22,17 @@ to build the test dll:
 
 normal mode:
 
-- `./caller.exe <dll> <return-type> <func-name>(<arg-type> <arg-value>, ...) [--print-return]`
+- `caller.exe <dll> <return_type> <func_name>(<arg_type> <arg_value>, ...) [--print-result]`
 
 interactive mode:
 
-- `./caller.exe --interactive`
+- `caller.exe --interactive [--normal-variables-pretty-please]`
 - `/loaddll <dll>`
-- `<optional dll name if not in focus> <return-type> <func-name>(<arg-type> <arg-value>, ...)`
+- `<optional dll name if not in focus> <return_type> <func_name>(<arg_type> <arg_value>, ...) [--print-result]`
+
+script mode:
+
+- `caller.exe --script <script>.ffi`
 
 ## help string
 
@@ -36,9 +40,9 @@ interactive mode:
 C:\Users\Administrator\Documents\dllfrankenstein>caller
 wilczurski's cool shit - repl + ffi
 Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
-    or: caller.exe --interactive
-    <type> can be: zero, nonzero, negative, nonnegative
-    not specifying means none
+    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>
+    Scripts by default use .ffi
+    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none
 Usage in interactive mode:
     /loaddll <path>                     Load and focus a DLL
     /freedll <path>                     Unload a DLL from registry
@@ -50,8 +54,10 @@ Usage in interactive mode:
     /hex     <addr>     [count]         Hex dump memory (default 64 bytes)
     /address <dll_path> <name>          Get a function pointer by name
     /quit                               Exit the program
-Variables are Write-Once Read-Many, no shadowing, no scopes.
+Variables by default are Write-Once Read-Many, no shadowing, no scopes.
+    --normal-variables-pretty-please allows reassignment. Not recommended.
     $<name> = <type> <value>            Assign a variable
+    $<name> = rhs                       Function call or command
     Variables can be used as function arguments, like test.dll void print(str "%d", $var1)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Usage in interactive mode is the same as non-interactive except for the focused DLL,
@@ -95,10 +101,49 @@ Value at 0x0000024BF4B21B60 (voidptr): 0x24bf4b35180
 > $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
 Result: 50150
 $class_atom = 0xc3e6
-> $hwnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
 Result: 0x7d0f02
-$hwnd = 0x7d0f02
-> user32.dll i32 ShowWindow(voidptr $hwnd, i32 5)
+$hWnd = 0x7d0f02
+> user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
+```
+
+## example; running a script
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --script window.ffi
+> $lpfnWndProc = /address user32.dll DefWindowProcA
+0x7ffcde461870
+$lpfnWndProc = 0x7ffcde461870
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
+Result: 0x7ff665db0000
+$hInstance = 0x7ff665db0000
+> $lpszClassName = /alloc 14
+0x000002628CF54690
+$lpszClassName = 0x2628cf54690
+> /memset $lpszClassName 0 14
+Set 14 bytes at 0x000002628CF54690 to 0x00
+> /set $lpszClassName str "mywindowclass"
+Value at 0x000002628CF54690 (str): mywindowclass
+> $wc = /alloc 72
+0x000002628CF415B0
+$wc = 0x2628cf415b0
+> /memset $wc 0 72
+Set 72 bytes at 0x000002628CF415B0 to 0x00
+> /set $wc+0x08 voidptr $lpfnWndProc
+Value at 0x000002628CF415B8 (voidptr): 0x7ffcde461870
+> /set $wc+0x18 voidptr $hInstance
+Value at 0x000002628CF415C8 (voidptr): 0x7ff665db0000
+> /set $wc+0x40 voidptr $lpszClassName
+Value at 0x000002628CF415F0 (voidptr): 0x2628cf54690
+> $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
+Result: 49901
+$class_atom = 0xc2ed
+> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0xa0e5a
+$hWnd = 0xa0e5a
+> user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
+> kernel32.dll void Sleep(i32 4000)
+> user32.dll i32 DestroyWindow(voidptr $hWnd) --assert=nonzero
 ```
 
 ## example; having fun with memory
@@ -108,15 +153,15 @@ C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
 --- Interactive DLL Caller ---
 Enter command or /quit to exit.
 > /alloc 128
-Allocated 128 bytes at 000002061136BF40
+Allocated 128 bytes at 0x000002061136BF40
 > /set 0x2061136BF40 i32 67
 > /get 0x2061136BF40 i32
 Value at 000002061136BF40 (i32): 67
 > /free 0x2061136BF40
-Freed memory at 000002061136BF40
+Freed memory at 0x000002061136BF40
 > /quit
 
-C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
 --- Interactive DLL Caller ---
 Enter command or /quit to exit.
 > /alloc 128
@@ -138,6 +183,8 @@ Dump of 0x0000024F2C245990 (128 bytes):
 Freed memory at 0x0000024F2C245990
 > /quit
 ```
+
+remember to /memset your memory kids!
 
 ## example; assertions
 
@@ -169,19 +216,31 @@ make a pr
 
 - maksw@maksw.pl
 
+## faq
+
 Q: Why make this?  
 A: Because `rundll32.exe` is too limiting.
 
 Q: Is this safe?  
-A: As long as the signature is valid.
+A: Usually.
 
 Q: Can I use this in production?  
 A: No warranty.
 
+Q: It crashed!  
+A: You lied.
+
 Q: Does it support all calling conventions?  
 A: Technically.
 
-Q: Can I do pointer math? A: Yes, basic arithmetic like $base + 0x40 works.
+Q: Are there bugs?  
+A: Features in progress.
+
+Q: Can I do pointer math?  
+A: Yes, basic arithmetic like $base + 0x40 works.
+
+Q: What is the scale of pointer math?  
+A: Bytes. Always.
 
 Q: Does it support variable arguments?  
 A: Yes.
