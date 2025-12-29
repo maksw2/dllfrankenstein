@@ -300,8 +300,18 @@ void process_command(char* input_line) {
             case TYPE_U64: *(uint64_t*)addr = (uint64_t)value; break;
             case TYPE_F32: { float f; memcpy(&f,&value,sizeof(float)); *(float*)addr = f; } break;
             case TYPE_F64: { double d; memcpy(&d,&value,sizeof(double)); *(double*)addr = d; } break;
+            case TYPE_STR: 
+                // Copy the actual characters into the buffer at 'addr'
+                if (value != 0) {
+                    strcpy((char*)addr, (char*)value); 
+                }
+                break;
+            case TYPE_VOIDPTR: *(uint64_t*)addr = value; break;
             default: printf("unsupported\n"); break;
         }
+        char res_buf[256];
+        format_result(value, type, res_buf, sizeof(res_buf));
+        printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
         free(addr_str); free(type_str); free(val_str);
         return;
     }
@@ -347,10 +357,57 @@ void process_command(char* input_line) {
             case TYPE_U64: value = (uint64_t)*(uint64_t*)addr; break;
             case TYPE_F32: { float f = *(float*)addr; memcpy(&value,&f,sizeof(float)); } break;
             case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
+            case TYPE_STR: 
+                // The address itself is where the string starts
+                value = addr; 
+                break;
+            case TYPE_VOIDPTR: value = *(uint64_t*)addr; break;
             default: printf("unsupported\n"); break;
         }
-        printf("Value at %p (%s): %llu\n", (void*)addr, type_str, value);
+        char res_buf[256];
+        format_result(value, type, res_buf, sizeof(res_buf));
+        printf("Value at 0x%p (%s): %s\n", (void*)addr, type_str, res_buf);
         free(addr_str); free(type_str);
+        return;
+    }
+
+    // --- Command: /hex <addr> <count> ---
+    if (strncmp(p, "/hex", 4) == 0) {
+        p = skip_ws(p + 4);
+        char* addr_str = read_token(&p);
+        char* count_str = read_token(&p);
+        if (!addr_str) return;
+
+        uint64_t addr = strtoull(addr_str, NULL, 16);
+        int count = count_str ? atoi(count_str) : 64; // Default to 64 bytes
+        if (count <= 0) count = 16;
+
+        unsigned char* data = (unsigned char*)addr;
+        
+        printf("Dump of 0x%p (%d bytes):\n", data, count);
+        for (int i = 0; i < count; i += 16) {
+            printf("  %p: ", data + i);
+            
+            // Print hex
+            for (int j = 0; j < 16; j++) {
+                if (i + j < count)
+                    printf("%02X ", data[i + j]);
+                else
+                    printf("   ");
+            }
+            
+            // Print ASCII
+            printf(" |");
+            for (int j = 0; j < 16; j++) {
+                if (i + j < count) {
+                    unsigned char c = data[i + j];
+                    printf("%c", (c >= 32 && c <= 126) ? c : '.');
+                }
+            }
+            printf("|\n");
+        }
+
+        free(addr_str); if(count_str) free(count_str);
         return;
     }
 
@@ -567,8 +624,9 @@ int main(int argc, char** argv) {
             printf("      /alloc   <size in bytes>            Allocate memory\n");
             printf("      /free    <addr>                     Free allocated memory\n");
             printf("      /set     <addr>     <type>  <value> Store a value at a memory address\n");
+            printf("      /memset  <addr>     <value> [count] Set a block of memory to a byte value\n");
             printf("      /get     <addr>     <type>          Get a value from a memory address\n");
-            printf("      /memset  <addr>     <value> <count> Set a block of memory to a byte value\n");
+            printf("      /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n");
             printf("      /address <dll_path> <name>          Get a function pointer by name\n");
             printf("      /quit                               Exit the program\n");
             printf("    Usage in interactive mode is the same as non-interactive with the exception of the focused dll, then no need to specify <dll_path>\n");

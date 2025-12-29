@@ -33,7 +33,7 @@ interactive mode:
 ## help string
 
 ```
-C:\Users\maksw\Documents\dllfrankenstein>caller
+C:\Users\Administrator\Documents\dllfrankenstein>caller
 wilczurski's cool shit - ffi
 Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<type>]
     <type> can be: zero, nonzero, negative, nonnegative
@@ -59,30 +59,30 @@ Usage: caller.exe <dll_path> <ret> <func>(<args>) [--print-result] [--assert=<ty
 ## example; creating a win32 window
 
 ```
-C:\Users\maksw\Documents\dllfrankenstein>caller.exe --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
 --- Interactive DLL Caller ---
 Enter command or /quit to exit.
-> /loaddll test.dll
-Loaded and registered: test.dll (Focus set)
-> test.dll voidptr gimmewindowclass(str "mywindowclass") --print-result
-Result: 0x12c1f23f9c0
-> /loaddll user32.dll
-Loaded and registered: user32.dll (Focus set)
-> /loaddll kernel32.dll
-Loaded and registered: kernel32.dll (Focus set)
+> /address user32.dll DefWindowProcA
+Function 'DefWindowProcA' in 'user32.dll' is at address: 0x00007FFCDE461870
 > kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result
-Result: 0x7ff68f4b0000
-> user32.dll u16 RegisterClassA(voidptr 0x12c1f23f9c0) --print-result
-Result: 49895
-> user32.dll voidptr CreateWindowExA(u32 0, str "mywindowclass", str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr 0x7ff68f4b0000, voidptr 0) --print-result
-Result: 0x2037e
-> user32.dll i32 ShowWindow(voidptr 0x2037e, i32 5)
-> test.dll void PumpEvents()
-> user32.dll void DestroyWindow(voidptr 0x2037e)
-> test.dll void print(str "it all works!\n")
-it all works!
-> test.dll void print(str "%s %s %s\n", str "varargs", str "work", str "too")
-varargs work too
+Result: 0x7ff7d8990000
+> /alloc 32
+Allocated 32 bytes at 0x000002BD5ED7A0C0
+> /memset 0x000002BD5ED7A0C0 0
+> /set 0x000002BD5ED7A0C0 str "mywindowclass"
+> /alloc 72
+Allocated 72 bytes at 0x000002BD5ED71DA0
+> /memset 0x000002BD5ED71DA0 0 72
+Set 72 bytes at 0x000002BD5ED71DA0 to 0x00
+> /set 0x000002BD5ED71DA8 voidptr 0x00007FFCDE461870
+> /set 0x000002BD5ED71DB8 voidptr 0x7ff7d8990000
+> /set 0x000002BD5ED71DE0 voidptr 0x000002BD5ED7A0C0
+> user32.dll u16 RegisterClassA(voidptr 0x000002BD5ED71DA0) --print-result --assert=nonzero
+Result: 49904
+> user32.dll voidptr CreateWindowExA(u32 0, str "mywindowclass", str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr 0x7ff7d8990000, voidptr 0) --print-result --assert=nonzero
+Result: 0x420870
+> user32.dll i32 ShowWindow(voidptr 0x420870, i32 5)
+> user32.dll void DestroyWindow(voidptr 0x420870)
 > /quit
 ```
 
@@ -99,6 +99,28 @@ Allocated 128 bytes at 000002061136BF40
 Value at 000002061136BF40 (i32): 67
 > /free 0x2061136BF40
 Freed memory at 000002061136BF40
+> /quit
+
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+--- Interactive DLL Caller ---
+Enter command or /quit to exit.
+> /alloc 128
+Allocated 128 bytes at 0x0000024F2C245990
+> /set 0x0000024F2C245990 str "hello, world!"
+> /get 0x0000024F2C245990 str
+Value at 0x0000024F2C245990 (str): hello, world!
+> /hex 0x0000024F2C245990 128
+Dump of 0x0000024F2C245990 (128 bytes):
+  0000024F2C245990: 68 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00 00 00  |hello, world!...|
+  0000024F2C2459A0: 6E 00 3B 00 43 00 3A 00 5C 00 55 00 73 00 65 00  |n.;.C.:.\.U.s.e.|
+  0000024F2C2459B0: 72 00 73 00 5C 00 41 00 64 00 6D 00 69 00 6E 00  |r.s.\.A.d.m.i.n.|
+  0000024F2C2459C0: 69 00 73 00 74 00 72 00 61 00 74 00 6F 00 72 00  |i.s.t.r.a.t.o.r.|
+  0000024F2C2459D0: 5C 00 41 00 70 00 70 00 44 00 61 00 74 00 61 00  |\.A.p.p.D.a.t.a.|
+  0000024F2C2459E0: 5C 00 4C 00 6F 00 63 00 61 00 6C 00 5C 00 50 00  |\.L.o.c.a.l.\.P.|
+  0000024F2C2459F0: 72 00 6F 00 67 00 72 00 61 00 6D 00 73 00 5C 00  |r.o.g.r.a.m.s.\.|
+  0000024F2C245A00: 4D 00 69 00 63 00 72 00 6F 00 73 00 6F 00 66 00  |M.i.c.r.o.s.o.f.|
+> /free 0x0000024F2C245990
+Freed memory at 0x0000024F2C245990
 > /quit
 ```
 
@@ -147,7 +169,7 @@ Q: Does it support all calling conventions?
 A: It's x86_64 dumbass.
 
 Q: Does it support variable arguments?  
-A: Yes. Look at the example.
+A: Yes.
 
 Q: Will you add fancy type parsing?  
 A: How about no.
