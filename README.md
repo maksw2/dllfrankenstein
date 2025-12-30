@@ -18,28 +18,13 @@ to build the app:
 to build the test dll:
 - `cl /LD /Zi test.c /link /debug`
 
-### to run it:
-
-normal mode:
-
-- `caller.exe <dll> <return_type> <func_name>(<arg_type> <arg_value>, ...) [--print-result]`
-
-interactive mode:
-
-- `caller.exe --interactive [--normal-variables-pretty-please]`
-- `/loaddll <dll>`
-- `<optional dll name if not in focus> <return_type> <func_name>(<arg_type> <arg_value>, ...) [--print-result]`
-
-script mode:
-
-- `caller.exe --script <script>.ffi`
-
 ## help string
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller
 wilczurski's cool shit - repl + ffi
 Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
+    <func_name> can be an ordinal #<ordinal>
     or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>
     Scripts by default use .ffi
     <type> can be: zero, nonzero, negative, nonnegative, not specifying means none
@@ -202,6 +187,21 @@ Assertion failed for result: 0
 > test.dll i32 Add(i32 9, i32 10) --print-result --assert=zero
 Result: 19
 Assertion failed for result: 19
+> /quit
+```
+
+## example; import by ordinal
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Sleep
+       1481  5C8 00031980 Sleep
+C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Beep
+        117   74 0004F780 Beep
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+--- Interactive DLL Caller ---
+Enter command or /quit to exit.
+> kernel32.dll void #1481(i32 5000)
+> kernel32.dll void #117(i32 750, i32 300)
 > /quit
 ```
 

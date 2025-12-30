@@ -670,7 +670,23 @@ uint64_t handle_function_call(char* input_line) {
     spec.return_type = parse_type(ret_type_str);
     parse_arguments(&p, &spec);
 
-    void* func_ptr = (void*)GetProcAddress(target_dll, spec.func_name);
+    void* func_ptr = NULL;
+
+    // Check if the function name is an ordinal (starts with #)
+    if (spec.func_name[0] == '#') {
+        char* end = nullptr;
+        long ordinal = strtol(spec.func_name + 1, &end, 10);
+
+        if (end != spec.func_name + 1 && ordinal > 0 && ordinal <= 0xFFFF) {
+            func_ptr = (void*)GetProcAddress(
+                target_dll,
+                MAKEINTRESOURCEA((WORD)ordinal)
+            );
+        }
+    } else {
+        func_ptr = (void*)GetProcAddress(target_dll, spec.func_name);
+    }
+    
     if (!func_ptr) {
         printf("Error: Function '%s' not found.\n", spec.func_name);
 
@@ -857,6 +873,7 @@ int main(int argc, char** argv) {
             printf(
                 "wilczurski's cool shit - repl + ffi\n"
                 "Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
+                "    <func_name> can be an ordinal #<ordinal>\n"
                 "    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>\n"
                 "    Scripts by default use .ffi\n"
                 "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
