@@ -16,7 +16,7 @@ to build the app:
 - `link caller.obj helper.obj /debug /out:caller.exe`
 
 to build the test dll:
-- `cl /LD /Zi test.c /link /debug`
+- `cl /LD /Zi test.c /link /debug user32.lib gdi32.lib legacy_stdio_definitions.lib`
 
 ## help string
 
@@ -29,6 +29,7 @@ Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ..
     Scripts by default use .ffi
     <type> can be: zero, nonzero, negative, nonnegative, not specifying means none
 Usage in interactive mode:
+    To write a comment use ; like assembly
     /loaddll <path>                     Load and focus a DLL
     /freedll <path>                     Unload a DLL from registry
     /alloc   <size>                     Allocate memory. Provide <size> in bytes
@@ -38,6 +39,9 @@ Usage in interactive mode:
     /get     <addr>     <type>          Get a value from a memory address
     /hex     <addr>     [count]         Hex dump memory (default 64 bytes)
     /address <dll_path> <name>          Get a function pointer by name
+    /dlls                               List loaded DLLs
+    /for     <count>    {<cmd>}...      Repeat {commands} <count> times
+    /repeat-until       {<cmd>}...      Repeat {commands} until assert
     /quit                               Exit the program
 Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     --normal-variables-pretty-please allows reassignment. Not recommended.
@@ -45,7 +49,7 @@ Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     $<name> = rhs                       Function call or command
     Variables can be used as function arguments, like test.dll void print(str "%d", $var1)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
-Usage in interactive mode is the same as non-interactive except for the focused DLL,
+Usage in interactive mode is the same as non-interactive except when focused on a DLL,
 then you don't need to specify <dll_path>
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void
     Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,
@@ -53,7 +57,10 @@ Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void
 You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.
 ```
 
-## example; creating a win32 window
+## examples
+
+<details>
+<summary><b>creating a win32 window</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
@@ -92,46 +99,124 @@ $hWnd = 0x7d0f02
 > user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
 ```
 
-## example; running a script
+</details>
+
+<details>
+<summary><b>running a script</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --script window.ffi
-> $lpfnWndProc = /address user32.dll DefWindowProcA
-0x7ffcde461870
-$lpfnWndProc = 0x7ffcde461870
+> $lpfnWndProc = /address test.dll WindowProcess
+[Auto-Registered: test.dll]
+0x7FFC97A01EE2
+$lpfnWndProc = 0x7FFC97A01EE2
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
-Result: 0x7ff665db0000
-$hInstance = 0x7ff665db0000
+Result: 0x7FF7E2150000
+$hInstance = 0x7FF7E2150000
 > $lpszClassName = /alloc 14
-0x000002628CF54690
-$lpszClassName = 0x2628cf54690
+0x21145208700
+$lpszClassName = 0x21145208700
 > /memset $lpszClassName 0 14
-Set 14 bytes at 0x000002628CF54690 to 0x00
+Set 14 bytes at 0x21145208700 to 0x00
 > /set $lpszClassName str "mywindowclass"
-Value at 0x000002628CF54690 (str): mywindowclass
+Value at 0x21145208700 (str): mywindowclass
+> $hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
+$hCursor = 0x10003
 > $wc = /alloc 72
-0x000002628CF415B0
-$wc = 0x2628cf415b0
+0x211452077A0
+$wc = 0x211452077A0
 > /memset $wc 0 72
-Set 72 bytes at 0x000002628CF415B0 to 0x00
-> /set $wc+0x08 voidptr $lpfnWndProc
-Value at 0x000002628CF415B8 (voidptr): 0x7ffcde461870
-> /set $wc+0x18 voidptr $hInstance
-Value at 0x000002628CF415C8 (voidptr): 0x7ff665db0000
-> /set $wc+0x40 voidptr $lpszClassName
-Value at 0x000002628CF415F0 (voidptr): 0x2628cf54690
+Set 72 bytes at 0x211452077A0 to 0x00
+> /set $wc u32 3 ; style
+Value at 0x211452077A0 (u32): 3
+> /set $wc+0x08 voidptr $lpfnWndProc ; lpfnWndProc
+Value at 0x211452077A8 (voidptr): 0x7FFC97A01EE2
+> ; i32 0x10 cbClsExtra
+> ; i32 0x14 cbWndExtra
+> /set $wc+0x18 voidptr $hInstance ; hInstance
+Value at 0x211452077B8 (voidptr): 0x7FF7E2150000
+> /set $wc+0x28 voidptr $hCursor
+Value at 0x211452077C8 (voidptr): 0x10003
+> ; voidptr 0x20 hIcon
+> /set $wc+0x30 voidptr 6 ; hbrBackground
+Value at 0x211452077D0 (voidptr): 0x6
+> ; str 0x38 lpszMenuName
+> /set $wc+0x40 voidptr $lpszClassName ; lpszClassName
+Value at 0x211452077E0 (voidptr): 0x21145208700
 > $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
-Result: 49901
-$class_atom = 0xc2ed
-> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 100, i32 100, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
-Result: 0xa0e5a
-$hWnd = 0xa0e5a
+Result: 49964
+$class_atom = 0xC32C
+> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0x2E0924
+$hWnd = 0x2E0924
 > user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
-> kernel32.dll void Sleep(i32 4000)
-> user32.dll i32 DestroyWindow(voidptr $hWnd) --assert=nonzero
+> $hdc = user32.dll voidptr GetDC(voidptr $hWnd) --assert=nonzero
+$hdc = 0x21011316
+> $hPen = gdi32.dll voidptr CreatePen(i32 0, i32 5, u32 0x00FF0000) --assert=nonzero
+$hPen = 0xFFFFFFFFE13008EB
+> $hOldPen = gdi32.dll voidptr SelectObject(voidptr $hdc, voidptr $hPen)
+$hOldPen = 0xB00017
+> gdi32.dll i32 MoveToEx(voidptr $hdc, i32 50, i32 20, voidptr 0)
+> gdi32.dll i32 LineTo(voidptr $hdc, i32 20, i32 80)
+> gdi32.dll i32 LineTo(voidptr $hdc, i32 80, i32 80)
+> gdi32.dll i32 LineTo(voidptr $hdc, i32 50, i32 20)
+> gdi32.dll voidptr SelectObject(voidptr $hdc, voidptr $hOldPen)
+> gdi32.dll i32 DeleteObject(voidptr $hPen)
+> user32.dll i32 ReleaseDC(voidptr $hWnd, voidptr $hdc)
+> $msg = /alloc 48
+0x2114522AF00
+$msg = 0x2114522AF00
+> /memset $msg 0 48
+Set 48 bytes at 0x2114522AF00 to 0x00
+> /repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}{kernel32.dll void Sleep(i32 100)}
+Assertion failed for result: 0
+> test.dll void print(str "goodbye!\n")
+goodbye!
+> /free $lpszClassName
+Freed memory at 0x21145208700
+> /quit
 ```
 
-## example; having fun with memory
+</details>
+
+<details>
+<summary><b>starting tf2</b></summary>
+
+rename the executable to tf.exe
+
+```
+D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
+
+D:\SteamLibrary\steamapps\common\Team Fortress 2>tf --interactive
+--- Interactive DLL Caller ---
+Enter command or /quit to exit.
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
+$hInstance = 0x7FF765AB0000
+> launcher.dll i32 LauncherMain(voidptr $hInstance, voidptr 0, str "-game tf", i32 1) --print-result
+Setting breakpad minidump AppID = 440
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded no]
+Using breakpad crash handler
+Forcing breakpad minidump interfaces to load
+Looking up breakpad interfaces from steamclient
+Calling BreakpadMiniDumpSystemInit
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+Looking up breakpad interfaces from steamclient
+Calling BreakpadMiniDumpSystemInit
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+Fontconfig error: Cannot load default config file: No such file: (null)
+Unable to remove d:\steamlibrary\steamapps\common\team fortress 2\tf\textwindow_temp.html!
+Result: 0
+>
+```
+
+</details>
+
+<details>
+<summary><b>having fun with memory</b></summary>
 
 ```
 C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
@@ -171,7 +256,10 @@ Freed memory at 0x0000024F2C245990
 
 remember to /memset your memory kids!
 
-## example; assertions
+</details>
+
+<details>
+<summary><b>assertions</b></summary>
 
 ```
 C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
@@ -190,7 +278,10 @@ Assertion failed for result: 19
 > /quit
 ```
 
-## example; import by ordinal
+</details>
+
+<details>
+<summary><b>import by ordinal</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Sleep
@@ -204,6 +295,8 @@ Enter command or /quit to exit.
 > kernel32.dll void #117(i32 750, i32 300)
 > /quit
 ```
+
+</details>
 
 ## how 2 contribute
 
@@ -219,16 +312,19 @@ make a pr
 ## faq
 
 Q: Why make this?  
-A: Because `rundll32.exe` is too limiting.
+A: Because `rundll32.exe` is stupid.
 
 Q: Is this safe?  
-A: Usually.
+A: In my experience.
 
 Q: Can I use this in production?  
 A: No warranty.
 
 Q: It crashed!  
-A: You lied.
+A: Liar liar pants on fire.
+
+Q: No i did not!  
+A: Open an issue.
 
 Q: Does it support all calling conventions?  
 A: Technically.

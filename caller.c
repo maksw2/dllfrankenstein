@@ -66,6 +66,8 @@ bool set_var(const char* name, uint64_t value) {
     if (existing) {
         if (existing->is_set && !normal_vars) {
             printf("Error: Variable '%s' is already set\n", name);
+            if (!interactive)
+                    exit(1);
             return false;
         }
         existing->value = value;
@@ -75,6 +77,8 @@ bool set_var(const char* name, uint64_t value) {
     
     if (g_var_count >= 128) {
         printf("Error: Maximum number of variables reached\n");
+        if (!interactive)
+                exit(1);
         return false;
     }
     
@@ -125,6 +129,8 @@ char* expand_vars(const char* input) {
         Variable* var = find_var(var_name);
         if (!var) {
             printf("Error: Variable '$%s' not found\n", var_name);
+            if (!interactive)
+                exit(1);
             break; 
         }
 
@@ -362,7 +368,7 @@ typedef struct {
 
 RegisteredDLL g_registry[32];
 int g_registry_count = 0;
-int g_focus_idx = -1; // Index of the "active" DLL for shorthand calls
+int g_focus_idx = -1;
 
 // Helper to find a DLL in our registry
 HMODULE find_registered_dll(const char* path, int* out_idx) {
@@ -551,7 +557,7 @@ void handle_hex_command(char* p) {
 }
 
 uint64_t handle_address_command(char* p) {
-    p = skip_ws(p + 8);
+    p = skip_ws(p + 8); // Skip "/address"
     char* expanded = expand_vars(p);
     char* work_p = expanded;
     char* dll_path = read_token(&work_p);
@@ -559,18 +565,47 @@ uint64_t handle_address_command(char* p) {
     
     uint64_t result_addr = 0;
     if (dll_path && name_str) {
+        // 1. Check if it's already registered
         HMODULE h = find_registered_dll(dll_path, NULL);
-        bool temp_load = false;
-        if (!h) { h = LoadLibraryA(dll_path); temp_load = true; }
+        
+        if (!h) { 
+            // 2. Not found? Load it properly
+            h = LoadLibraryA(dll_path); 
+            if (h) {
+                // 3. Add to registry so it's "pinned" in memory
+                if (g_registry_count < 32) {
+                    strncpy(g_registry[g_registry_count].path, dll_path, 255);
+                    g_registry[g_registry_count].handle = h;
+                    g_focus_idx = g_registry_count; // Set focus to this DLL
+                    g_registry_count++;
+                    printf("[Auto-Registered: %s]\n", dll_path);
+                } else {
+                    printf("Error: Registry full, cannot pin DLL.\n");
+                    if (!interactive)
+                        exit(1);
+                }
+            } else {
+                printf("Error: Could not load %s\n", dll_path);
+                if (!interactive)
+                    exit(1);
+            }
+        }
 
         if (h) {
             result_addr = (uint64_t)GetProcAddress(h, name_str);
-            if (result_addr) printf("0x%llX\n", result_addr);
-            if (temp_load) FreeLibrary(h);
+            if (result_addr) {
+                printf("0x%llX\n", result_addr);
+            } else {
+                printf("Error: Symbol '%s' not found in %s\n", name_str, dll_path);
+                if (!interactive)
+                    exit(1);
+            }
         }
     }
 
-    free(dll_path); free(name_str); free(expanded);
+    free(dll_path); 
+    free(name_str); 
+    free(expanded);
     return result_addr;
 }
 
@@ -590,9 +625,11 @@ void handle_loaddll_command(char* p) {
             printf("Loaded and registered: %s (Focus set)\n", expanded);
         } else {
             printf("Error: Could not load '%s' (Error: %lu)\n", expanded, GetLastError());
+            if (!interactive)
+                exit(1);
         }
     }
-    
+
     free(expanded);
 }
 
@@ -614,19 +651,52 @@ void handle_freedll_command(char* p) {
     free(expanded);
 }
 
+void handle_dlls_command() {
+    printf("Registered DLLs (%d/%d)\n", g_registry_count, 32);
+    
+    if (g_registry_count == 0) {
+        printf("No DLLs loaded.\n");
+        return;
+    }
+
+    printf("%-3s %-10s %s\n", "ID", "Handle", "Path");
+
+    for (int i = 0; i < g_registry_count; i++) {
+        // Use an asterisk or arrow to indicate the focused DLL
+        char focus_char = (i == g_focus_idx) ? '>' : ' ';
+        
+        printf("%c%02d [0x%p] %s\n", 
+               focus_char, 
+               i, 
+               g_registry[i].handle, 
+               g_registry[i].path);
+    }
+}
+
+bool assert_failed = false;
+
 uint64_t handle_function_call(char* input_line) {
     char* p = input_line;
+    // 1. Expand variables (e.g., $print becomes 0x7FFCA03D4CDC)
     char* expanded = expand_vars(p);
     p = expanded;
 
     CallSpec spec = {0};
     char* flags_ptr = NULL;
     int in_quotes = 0;
+
+    // 2. Extract flags (trailing -- assertions or print settings)
     for (char* s = p; *s; s++) {
         if (*s == '"') in_quotes = !in_quotes;
-        if (!in_quotes && s[0] == '-' && s[1] == '-') { flags_ptr = s; break; }
+        if (!in_quotes && s[0] == '-' && s[1] == '-') { 
+            flags_ptr = s; 
+            break; 
+        }
     }
-    if (flags_ptr) { parse_flags(flags_ptr, &spec); *flags_ptr = '\0'; }
+    if (flags_ptr) { 
+        parse_flags(flags_ptr, &spec); 
+        *flags_ptr = '\0'; 
+    }
 
     HMODULE target_dll = NULL;
     char first_token[256];
@@ -640,6 +710,7 @@ uint64_t handle_function_call(char* input_line) {
     strncpy(first_token, token, 255);
     free(token);
 
+    // 3. Determine DLL Context
     if (strstr(first_token, ".dll") != NULL) {
         target_dll = find_registered_dll(first_token, NULL);
         if (!target_dll) {
@@ -647,24 +718,26 @@ uint64_t handle_function_call(char* input_line) {
             if (!target_dll) {
                 printf("Error: Failed to load %s\n", first_token);
                 free(expanded);
+                if (!interactive)
+                    exit(1);
                 return 0;
             }
         }
         p = temp_p;
     } else {
+        // Use focused DLL if no explicit DLL is provided
         if (g_focus_idx != -1) {
             target_dll = g_registry[g_focus_idx].handle;
-        } else {
-            printf("Error: No DLL focused. Use /loaddll or specify <name>.dll\n");
-            free(expanded);
-            return 0;
         }
     }
 
+    // 4. Parse Return Type and Function Name (or Hex Address)
     char ret_type_str[32];
     if (!parse_header(&p, ret_type_str, spec.func_name)) {
         printf("Error: Signature parse failed\n");
         free(expanded);
+        if (!interactive)
+            exit(1);
         return 0;
     }
     spec.return_type = parse_type(ret_type_str);
@@ -672,29 +745,44 @@ uint64_t handle_function_call(char* input_line) {
 
     void* func_ptr = NULL;
 
-    // Check if the function name is an ordinal (starts with #)
-    if (spec.func_name[0] == '#') {
-        char* end = nullptr;
-        long ordinal = strtol(spec.func_name + 1, &end, 10);
-
-        if (end != spec.func_name + 1 && ordinal > 0 && ordinal <= 0xFFFF) {
-            func_ptr = (void*)GetProcAddress(
-                target_dll,
-                MAKEINTRESOURCEA((WORD)ordinal)
-            );
+    // 5. RESOLVE FUNCTION POINTER
+    // Case A: Direct Address (Hexadecimal)
+    if (spec.func_name[0] == '0' && (spec.func_name[1] == 'x' || spec.func_name[1] == 'X')) {
+        func_ptr = (void*)_strtoui64(spec.func_name, NULL, 16);
+    } 
+    // Case B: Ordinal Lookup (starts with #)
+    else if (spec.func_name[0] == '#') {
+        if (target_dll) {
+            char* end = NULL;
+            long ordinal = strtol(spec.func_name + 1, &end, 10);
+            if (end != spec.func_name + 1 && ordinal > 0 && ordinal <= 0xFFFF) {
+                func_ptr = (void*)GetProcAddress(target_dll, MAKEINTRESOURCEA((WORD)ordinal));
+            }
         }
-    } else {
-        func_ptr = (void*)GetProcAddress(target_dll, spec.func_name);
+    } 
+    // Case C: Standard Export Lookup
+    else {
+        if (target_dll) {
+            func_ptr = (void*)GetProcAddress(target_dll, spec.func_name);
+        } else {
+            printf("Error: No DLL context to find function '%s'. Use a DLL name or focus one.\n", spec.func_name);
+            free(expanded);
+            if (!interactive)
+                exit(1);
+            return 0;
+        }
     }
     
+    // 6. EXECUTION
     if (!func_ptr) {
-        printf("Error: Function '%s' not found.\n", spec.func_name);
-
+        printf("Error: Could not resolve function '%s'.\n", spec.func_name);
+        // Clean up arguments before returning
         for (int j = 0; j < spec.arg_count; j++) {
             if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
         }
-        
         free(expanded);
+        if (!interactive)
+            exit(1);
         return 0;
     }
 
@@ -702,18 +790,23 @@ uint64_t handle_function_call(char* input_line) {
     uint32_t float_mask = 0;
     for (int j = 0; j < spec.arg_count; j++) {
         args[j] = spec.args[j].value;
-        if (spec.args[j].type == TYPE_F32 || spec.args[j].type == TYPE_F64) float_mask |= (1 << j);
+        if (spec.args[j].type == TYPE_F32 || spec.args[j].type == TYPE_F64) {
+            float_mask |= (1 << j);
+        }
     }
+
+    //printf("DEBUG: Jumping to %p with %d args\n", func_ptr, spec.arg_count);
     uint64_t result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
     
+    // 7. POST-CALL: Formatting & Assertions
     if (spec.print_result && spec.return_type != TYPE_VOID) {
         char buf[256];
         format_result(result, spec.return_type, buf, sizeof(buf));
         printf("Result: %s\n", buf);
     }
     
+    assert_failed = false;
     if (spec.assert_type != ASSERT_NONE) {
-        bool assert_failed = false;
         switch (spec.assert_type) {
             case ASSERT_ZERO: if (result != 0) assert_failed = true; break;
             case ASSERT_NOT_ZERO: if (result == 0) assert_failed = true; break;
@@ -722,29 +815,136 @@ uint64_t handle_function_call(char* input_line) {
             default: break;
         }
         if (assert_failed) {
-            printf("Assertion failed for result: ");
             char buf[256];
             format_result(result, spec.return_type, buf, sizeof(buf));
-            printf("%s\n", buf);
-
-            if (!interactive)
-                exit(1);
+            printf("Assertion failed for result: %s\n", buf);
         }
     }
 
+    // Cleanup
     for (int j = 0; j < spec.arg_count; j++) {
         if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
     }
     
     free(expanded);
-    
-    if (spec.return_type != TYPE_VOID) return result;
-    return 0;
+    return (spec.return_type != TYPE_VOID) ? result : 0;
+}
+
+void handle_for_command(char* input_line) {
+    uint64_t process_command(char* input_line);
+    char* p = skip_ws(input_line + 4); // skip "/for"
+    if (!*p) return;
+
+    // 1. Parse loop count
+    char* endptr = NULL;
+    long count = strtol(p, &endptr, 0);
+    if (count <= 0) return;
+
+    p = skip_ws(endptr);
+    if (*p != '{') { printf("Expected '{' after count\n"); return; }
+
+    // 2. Execute the loop
+    for (long i = 0; i < count; i++) {
+        char* cmd_ptr = p;
+        while (*cmd_ptr) {
+            cmd_ptr = skip_ws(cmd_ptr);
+            if (!*cmd_ptr) break;
+            if (*cmd_ptr != '{') {
+                printf("Expected '{' for a command in /for loop\n");
+                return;
+            }
+            cmd_ptr++; // skip '{'
+
+            // Find the matching '}'
+            char* cmd_start = cmd_ptr;
+            int brace_level = 1;
+            while (*cmd_ptr && brace_level > 0) {
+                if (*cmd_ptr == '{') brace_level++;
+                else if (*cmd_ptr == '}') brace_level--;
+                cmd_ptr++;
+            }
+
+            if (brace_level != 0) {
+                printf("Mismatched braces in /for loop\n");
+                return;
+            }
+
+            size_t cmd_len = (size_t)(cmd_ptr - cmd_start - 1);
+            char* cmd = malloc(cmd_len + 1);
+            memcpy(cmd, cmd_start, cmd_len);
+            cmd[cmd_len] = '\0';
+
+            // Process this command
+            process_command(cmd);
+            free(cmd);
+        }
+    }
+}
+
+void handle_repeat_until_command(char* input_line) {
+    uint64_t process_command(char* input_line);
+    char* p = skip_ws(input_line + 13); // skip "/repeat-until"
+    if (!*p) return;
+
+    if (*p != '{') { printf("Expected '{' after count\n"); return; }
+
+    // 2. Execute the loop
+    while (true) {
+        char* cmd_ptr = p;
+        while (*cmd_ptr) {
+            cmd_ptr = skip_ws(cmd_ptr);
+            if (!*cmd_ptr) break;
+            if (*cmd_ptr != '{') {
+                printf("Expected '{' for a command in /for loop\n");
+                return;
+            }
+            cmd_ptr++; // skip '{'
+
+            // Find the matching '}'
+            char* cmd_start = cmd_ptr;
+            int brace_level = 1;
+            while (*cmd_ptr && brace_level > 0) {
+                if (*cmd_ptr == '{') brace_level++;
+                else if (*cmd_ptr == '}') brace_level--;
+                cmd_ptr++;
+            }
+
+            if (brace_level != 0) {
+                printf("Mismatched braces in /for loop\n");
+                return;
+            }
+
+            size_t cmd_len = (size_t)(cmd_ptr - cmd_start - 1);
+            char* cmd = malloc(cmd_len + 1);
+            memcpy(cmd, cmd_start, cmd_len);
+            cmd[cmd_len] = '\0';
+
+            // Process this command
+            process_command(cmd);
+            free(cmd);
+
+            if (assert_failed) {
+                assert_failed = false;
+                return;
+            }
+        }
+    }
+}
+
+int match_cmd(const char* input, const char* cmd, int allow_args) {
+    size_t len = strlen(cmd);
+    if (strncmp(input, cmd, len) != 0) return 0;
+    char next = input[len];
+    if (allow_args) return next == ' ' || next == '\0';
+    else return next == '\0';
 }
 
 uint64_t process_command(char* input_line) {
     char* p = skip_ws(input_line);
     if (!*p) return 0;
+
+    char* comment_ptr = strchr(p, ';');
+    if (comment_ptr) *comment_ptr = '\0';
 
     // 1. Handle Variable Assignment ($a = ...)
     if (*p == '$') {
@@ -770,15 +970,20 @@ uint64_t process_command(char* input_line) {
 
     // Command dispatch
     if (*p == '/') {
-        if (strncmp(p, "/quit", 5) == 0)    { handle_quit_command(); return 0; }
-        else if (strncmp(p, "/alloc", 6) == 0)   { return handle_alloc_command(p); }
-        else if (strncmp(p, "/free", 5) == 0)    { handle_free_command(p); return 0; }
-        else if (strncmp(p, "/set", 4) == 0)     { handle_set_command(p); return 0; }
-        else if (strncmp(p, "/memset", 7) == 0)  { handle_memset_command(p); return 0; }
-        else if (strncmp(p, "/get", 4) == 0)     { return handle_get_command(p); }
-        else if (strncmp(p, "/hex", 4) == 0)     { handle_hex_command(p); return 0; }
-        else if (strncmp(p, "/address", 8) == 0) { return handle_address_command(p); }
-        else if (strncmp(p, "/loaddll", 8) == 0) { handle_loaddll_command(p); return 0; }
+        if (match_cmd(p, "/quit", false))             { handle_quit_command(); }
+        else if (match_cmd(p, "/alloc", true))        { return handle_alloc_command(p); }
+        else if (match_cmd(p, "/free", true))         { handle_free_command(p); return 0; }
+        else if (match_cmd(p, "/set", true))          { handle_set_command(p); return 0; }
+        else if (match_cmd(p, "/memset", true))       { handle_memset_command(p); return 0; }
+        else if (match_cmd(p, "/get", true))          { return handle_get_command(p); }
+        else if (match_cmd(p, "/hex", true))          { handle_hex_command(p); return 0; }
+        else if (match_cmd(p, "/address", true))      { return handle_address_command(p); }
+        else if (match_cmd(p, "/loaddll", true))      { handle_loaddll_command(p); return 0; }
+        else if (match_cmd(p, "/freedll", true))      { handle_freedll_command(p); return 0; }
+        else if (match_cmd(p, "/dlls", false))        { handle_dlls_command(); return 0; }
+        else if (match_cmd(p, "/for", true))          { handle_for_command(p); return 0; }
+        else if (match_cmd(p, "/repeat-until", true)) { handle_repeat_until_command(p); return 0; }
+        else { printf("Unknown command: %s\n", p); return 0; }
     }
 
     char* temp_p = p;
@@ -865,6 +1070,8 @@ int main(int argc, char** argv) {
             printf("> %s\n", line);
             process_command(line);
             line = strtok(NULL, "\n");
+            if (assert_failed)
+                break;
         }
 
         free(content);
@@ -878,6 +1085,7 @@ int main(int argc, char** argv) {
                 "    Scripts by default use .ffi\n"
                 "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
                 "Usage in interactive mode:\n"
+                "    To write a comment use ; like assembly\n"
                 "    /loaddll <path>                     Load and focus a DLL\n"
                 "    /freedll <path>                     Unload a DLL from registry\n"
                 "    /alloc   <size>                     Allocate memory. Provide <size> in bytes\n"
@@ -887,6 +1095,9 @@ int main(int argc, char** argv) {
                 "    /get     <addr>     <type>          Get a value from a memory address\n"
                 "    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n"
                 "    /address <dll_path> <name>          Get a function pointer by name\n"
+                "    /dlls                               List loaded DLLs\n"
+                "    /for     <count>    {<cmd>}...      Repeat {commands} <count> times\n"
+                "    /repeat-until       {<cmd>}...      Repeat {commands} until assert\n"
                 "    /quit                               Exit the program\n"
                 "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
                 "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
@@ -894,7 +1105,7 @@ int main(int argc, char** argv) {
                 "    $<name> = rhs                       Function call or command\n"
                 "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", $var1)\n"
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
-                "Usage in interactive mode is the same as non-interactive except for the focused DLL,\n"
+                "Usage in interactive mode is the same as non-interactive except when focused on a DLL,\n"
                 "then you don't need to specify <dll_path>\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void\n"
                 "    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,\n"

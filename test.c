@@ -36,15 +36,6 @@ extern __declspec(dllexport) void print(const char* format, ...) {
 extern __declspec(dllexport) const char* sprint(const char* format, ...) {
     va_list args;
     va_start(args, format);
-    char buffer[512];
-    vsprintf(buffer, format, args);
-    va_end(args);
-    return buffer;
-}
-
-extern __declspec(dllexport) const char* sprint2(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
 
     va_list args_copy;
     va_copy(args_copy, args);
@@ -72,24 +63,30 @@ extern __declspec(dllexport) const char* sprint2(const char* format, ...) {
     return buffer;
 }
 
-extern __declspec(dllexport) void* gimmewindowclass(const char* class_name) {
-    WNDCLASSA *wc = malloc(sizeof(WNDCLASSA));
-    memset(wc, 0, sizeof(WNDCLASSA));
-    wc->lpfnWndProc = DefWindowProcA;
-    wc->hInstance = GetModuleHandleA(NULL);
-    wc->lpszClassName = class_name;
-
-    return (void*)wc;
-}
-
-extern __declspec(dllexport) void PumpEvents() {
-    MSG msg;
-    int count = 100;
-
-    while (count < 100 && GetMessageA(&msg, NULL, 0, 0) > 0)
-    {
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
-        count++;
+extern __declspec(dllexport) LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_DESTROY:
+            // Post a quit message to the message queue
+            PostQuitMessage(0);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(255, 0, 0));
+            HGDIOBJ hOldPen = SelectObject(hdc, hPen);
+            MoveToEx(hdc, 50, 20, NULL);
+            LineTo(hdc, 20, 80);
+            LineTo(hdc, 80, 80);
+            LineTo(hdc, 50, 20);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hPen);
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
     }
+
+    // Let Windows handle any messages we don't care about
+    return DefWindowProcA(hWnd, msg, wp, lp);
 }
