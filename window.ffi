@@ -23,7 +23,7 @@ $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "m
 user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
 
 $hdc = user32.dll voidptr GetDC(voidptr $hWnd) --assert=nonzero
-$hPen = gdi32.dll voidptr CreatePen(i32 0, i32 5, u32 0x00FF0000) --assert=nonzero
+$hPen = gdi32.dll voidptr CreatePen(i32 0, i32 5, u32 0x000000FF) --assert=nonzero
 $hOldPen = gdi32.dll voidptr SelectObject(voidptr $hdc, voidptr $hPen)
 gdi32.dll i32 MoveToEx(voidptr $hdc, i32 50, i32 20, voidptr 0)
 gdi32.dll i32 LineTo(voidptr $hdc, i32 20, i32 80)
@@ -35,8 +35,8 @@ user32.dll i32 ReleaseDC(voidptr $hWnd, voidptr $hdc)
 
 $msg = /alloc 48
 /memset $msg 0 48
-/repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}{kernel32.dll void Sleep(i32 100)}
+/repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}{kernel32.dll void Sleep(i32 10)}
 
-test.dll void print(str "goodbye!\n")
+msvcrt.dll i32 printf(str "goodbye!\n")
 /free $lpszClassName
 /quit

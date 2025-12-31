@@ -170,7 +170,7 @@ $msg = 0x2114522AF00
 Set 48 bytes at 0x2114522AF00 to 0x00
 > /repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}{kernel32.dll void Sleep(i32 100)}
 Assertion failed for result: 0
-> test.dll void print(str "goodbye!\n")
+> msvcrt.dll i32 printf(str "goodbye!\n")
 goodbye!
 > /free $lpszClassName
 Freed memory at 0x21145208700
@@ -324,7 +324,7 @@ Q: It crashed!
 A: Liar liar pants on fire.
 
 Q: No i did not!  
-A: Open an issue.
+A: Open an issue. Unless you used --normal-variables-pretty-please, then go away.
 
 Q: Does it support all calling conventions?  
 A: Technically.
