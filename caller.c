@@ -103,73 +103,158 @@ char* skip_ws_backwards(char* str, char* limit) {
     return p;
 }
 
-char* expand_vars(const char* input) {
-    char* current_str = _strdup(input);
-    bool changed = true;
+char* strndup(const char* s, size_t n) {
+    char* copy = malloc(n + 1);
+    if (!copy) return NULL;
+    memcpy(copy, s, n);
+    copy[n] = '\0';
+    return copy;
+}
 
-    while (changed) {
+// Helper to get a value from either a literal or a variable
+uint64_t get_operand_value(char* p, char** endptr) {
+    p = skip_ws(p);
+    if (*p == '$') {
+        char* name_start = p + 1;
+        char* name_end = name_start;
+        while (*name_end && (isalnum((unsigned char)*name_end) || *name_end == '_'))
+            name_end++;
+        
+        size_t len = name_end - name_start;
+        char* var_name = strndup(name_start, len);
+        Variable* var = find_var(var_name);
+        free(var_name);
+        
+        *endptr = name_end;
+        return var ? var->value : 0; // Or handle error
+    } else {
+        return strtoull(p, endptr, 0);
+    }
+}
+
+char* expand_vars(const char* input) {
+    size_t buf_size = strlen(input) + 1;
+    char* result = malloc(buf_size);
+    if (!result) return NULL;
+    strcpy(result, input);
+
+    bool changed;
+    do {
         changed = false;
-        char* dollar = strchr(current_str, '$');
+        char* dollar = strchr(result, '$');
         if (!dollar) break;
 
-        // 1. Extract variable name
+        // Extract variable name dynamically
         char* name_start = dollar + 1;
         char* name_end = name_start;
-        while (*name_end && (isalnum((unsigned char)*name_end) || *name_end == '_')) {
+        while (*name_end && (isalnum((unsigned char)*name_end) || *name_end == '_'))
             name_end++;
-        }
 
-        int name_len = (int)(name_end - name_start);
-        if (name_len == 0) break; 
+        if (name_end == name_start) break; // no variable name
 
-        char var_name[64];
-        strncpy(var_name, name_start, name_len);
-        var_name[name_len] = '\0';
+        size_t name_len = name_end - name_start;
+        char* var_name = strndup(name_start, name_len);
+        if (!var_name) return NULL;
 
         Variable* var = find_var(var_name);
+        free(var_name);
+
         if (!var) {
-            printf("Error: Variable '$%s' not found\n", var_name);
-            if (!interactive)
+            fprintf(stderr, "Error: Variable '%.*s' not found\n", (int)name_len, name_start);
+            if (!interactive) {
+                free(result);
                 exit(1);
-            break; 
+            }
+            break;
         }
 
         uint64_t final_val = var->value;
-        char* expression_end = name_end;
+        char* expr_end = name_end;
 
-        // 2. Check for arithmetic suffix (e.g., + 0x08 or - 10)
+        // Enhanced arithmetic: support +, -, *, /, %, <<, >>
         char* p = skip_ws(name_end);
-        if (*p == '+' || *p == '-') {
+        while (*p) {
             char op = *p;
-            char* num_ptr = skip_ws(p + 1);
-            if (isxdigit((unsigned char)*num_ptr)) {
+            char op2 = *(p + 1);
+            
+            // Check for two-character operators
+            if ((op == '<' && op2 == '<') || (op == '>' && op2 == '>')) {
+                p += 2;
+                p = skip_ws(p);
                 char* endptr;
-                uint64_t offset = strtoull(num_ptr, &endptr, 0);
-                if (op == '+') final_val += offset;
-                else final_val -= offset;
-                expression_end = endptr; // Consume the math part of the string
+                uint64_t operand = get_operand_value(p, &endptr);
+                if (endptr == p) break; // no valid number
+                
+                if (op == '<') final_val <<= operand;
+                else final_val >>= operand;
+                
+                p = endptr;
+                expr_end = p;
             }
+            // Single-character operators
+            else if (op == '+' || op == '-' || op == '*' || op == '/' || op == '%') {
+                p++;
+                p = skip_ws(p);
+                char* endptr;
+                uint64_t operand = get_operand_value(p, &endptr);
+                if (endptr == p) break; // no valid number
+                
+                switch(op) {
+                    case '+': final_val += operand; break;
+                    case '-': final_val -= operand; break;
+                    case '*': final_val *= operand; break;
+                    case '/': 
+                        if (operand != 0) final_val /= operand;
+                        else {
+                            fprintf(stderr, "Error: Division by zero in variable expression\n");
+                            if (!interactive) { free(result); exit(1); }
+                        }
+                        break;
+                    case '%':
+                        if (operand != 0) final_val %= operand;
+                        else {
+                            fprintf(stderr, "Error: Modulo by zero in variable expression\n");
+                            if (!interactive) { free(result); exit(1); }
+                        }
+                        break;
+                }
+                
+                p = endptr;
+                expr_end = p;
+            }
+            else {
+                break; // Not an operator we recognize
+            }
+            
+            p = skip_ws(p);
         }
 
-        // 3. Construct the replacement hex string
+        // Format replacement
         char val_buf[32];
-        sprintf(val_buf, "0x%llX", final_val);
+        snprintf(val_buf, sizeof(val_buf), "0x%llX", final_val);
 
-        size_t prefix_len = dollar - current_str;
-        size_t suffix_len = strlen(expression_end);
+        size_t prefix_len = dollar - result;
+        size_t suffix_len = strlen(expr_end);
         size_t val_len = strlen(val_buf);
-        
-        char* new_str = malloc(prefix_len + val_len + suffix_len + 1);
-        memcpy(new_str, current_str, prefix_len);
-        memcpy(new_str + prefix_len, val_buf, val_len);
-        memcpy(new_str + prefix_len + val_len, expression_end, suffix_len + 1);
+        size_t new_size = prefix_len + val_len + suffix_len + 1;
 
-        free(current_str);
-        current_str = new_str;
-        changed = true; 
-    }
+        char* new_result = malloc(new_size);
+        if (!new_result) {
+            free(result);
+            return NULL;
+        }
 
-    return current_str;
+        memcpy(new_result, result, prefix_len);
+        memcpy(new_result + prefix_len, val_buf, val_len);
+        memcpy(new_result + prefix_len + val_len, expr_end, suffix_len + 1);
+
+        free(result);
+        result = new_result;
+        changed = true;
+
+    } while (changed);
+
+    return result;
 }
 
 // ------------------------ Helpers ------------------------
@@ -389,7 +474,7 @@ void handle_quit_command() {
 uint64_t handle_alloc_command(char* p) {
     p = skip_ws(p + 6);
     char* expanded = expand_vars(p);
-    int size = atoi(expanded);
+    size_t size = strtoull(expanded, NULL, 0);
     void* ptr = malloc(size);
     printf("0x%llX\n", (uint64_t)ptr);
     free(expanded);
