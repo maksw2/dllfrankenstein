@@ -45,6 +45,26 @@ typedef struct {
     bool is_set;
 } Variable;
 
+typedef struct Member {
+    char name[64];
+    TypeKind type;
+    int array_size;
+    char struct_name[64];
+    int offset;
+    int size;
+    int alignment;
+} Member;
+
+typedef struct Struct {
+    Member members[128];
+    int member_count;
+    int total_size;
+    int alignment;
+} Struct;
+
+Struct known_structs[256];
+int known_struct_count = 0;
+
 Variable g_vars[128];
 int g_var_count = 0;
 
@@ -502,6 +522,139 @@ HMODULE find_registered_dll(const char* path, int* out_idx) {
     return NULL;
 }
 
+void get_type_info(TypeKind type, int *size, int *align) {
+    switch (type) {
+        case TYPE_I8:
+        case TYPE_U8:
+            *size = 1; *align = 1; break;
+        case TYPE_I16:
+        case TYPE_U16:
+            *size = 2; *align = 2; break;
+        case TYPE_I32:
+        case TYPE_U32:
+        case TYPE_F32:
+            *size = 4; *align = 4; break;
+        case TYPE_I64:
+        case TYPE_U64:
+        case TYPE_F64:
+        case TYPE_PTR:
+            *size = 8; *align = 8; break;
+        default:
+            *size = 0; *align = 1;
+    }
+}
+
+int calc_padding(int offset, int alignment) {
+    int remainder = offset % alignment;
+    return remainder == 0 ? 0 : alignment - remainder;
+}
+
+int round_up(int size, int alignment) {
+    return ((size + alignment - 1) / alignment) * alignment;
+}
+
+void trim(char *str) {
+    char *start = str;
+    while (*start && isspace(*start)) start++;
+    
+    char *end = start + strlen(start) - 1;
+    while (end > start && isspace(*end)) end--;
+    *(end + 1) = '\0';
+    
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1);
+    }
+}
+
+const char* type_to_string(TypeKind type) {
+    switch (type) {
+        case TYPE_I8: return "i8";
+        case TYPE_U8: return "u8";
+        case TYPE_I16: return "i16";
+        case TYPE_U16: return "u16";
+        case TYPE_I32: return "i32";
+        case TYPE_U32: return "u32";
+        case TYPE_I64: return "i64";
+        case TYPE_U64: return "u64";
+        case TYPE_F32: return "f32";
+        case TYPE_F64: return "f64";
+        case TYPE_PTR: return "voidptr";
+        default: return "unknown";
+    }
+}
+
+void calculate_struct_layout(Struct *s) {
+    int offset = 0;
+    int max_align = 1;
+    
+    for (int i = 0; i < s->member_count; i++) {
+        Member *m = &s->members[i];
+        int size, align;
+        
+        get_type_info(m->type, &size, &align);
+        
+        if (m->array_size > 0) {
+            size *= m->array_size;
+        }
+        
+        int padding = calc_padding(offset, align);
+        offset += padding;
+        
+        m->offset = offset;
+        m->size = size;
+        m->alignment = align;
+        
+        offset += size;
+        
+        if (align > max_align) {
+            max_align = align;
+        }
+    }
+    
+    s->alignment = max_align;
+    s->total_size = round_up(offset, max_align);
+}
+
+void print_struct(Struct *s) {
+    printf("Offset | Size | Align | Type    | Name\n");
+    printf("------ | ---- | ----- | ------- | --------------------\n");
+    
+    int last_end = 0;
+    for (int i = 0; i < s->member_count; i++) {
+        Member *m = &s->members[i];
+        
+        // Print padding if any
+        if (m->offset > last_end) {
+            int padding = m->offset - last_end;
+            printf("0x%04X | (%d bytes padding)\n", last_end, padding);
+        }
+        
+        char type_str[64];
+        snprintf(type_str, sizeof(type_str), "%s", type_to_string(m->type));
+        
+        if (m->array_size > 0) {
+            char array_str[80];
+            snprintf(array_str, sizeof(array_str), "%s[%d]", type_str, m->array_size);
+            printf("0x%04X | %-4d | %-5d | %-7s | %s\n", 
+                   m->offset, m->size, m->alignment, array_str, m->name);
+        } else {
+            printf("0x%04X | %-4d | %-5d | %-7s | %s\n", 
+                   m->offset, m->size, m->alignment, type_str, m->name);
+        }
+        
+        last_end = m->offset + m->size;
+    }
+    
+    // Print trailing padding
+    if (s->total_size > last_end) {
+        int padding = s->total_size - last_end;
+        printf("0x%04X | (%d bytes trailing padding)\n", last_end, padding);
+    }
+    
+    printf("Total size: %d bytes (0x%X)\n", s->total_size, s->total_size);
+    printf("Alignment: %d bytes\n", s->alignment);
+}
+
 void handle_quit_command() {
     for (int i = 0; i < g_registry_count; i++) FreeLibrary(g_registry[i].handle);
     exit(0);
@@ -575,26 +728,43 @@ void handle_set_command(char* p) {
 }
 
 void handle_memset_command(char* p) {
-    p = skip_ws(p + 7);
+    p = skip_ws(p + 7); // Skip "/memset"
     char* expanded = expand_vars(p);
     char* work_p = expanded;
     
     char* addr_str = read_token(&work_p);
     char* val_str = read_token(&work_p);
     char* count_str = read_token(&work_p);
+
     if (!addr_str || !val_str || !count_str) {
+        printf("Error: /memset requires <addr> <value> <count>\n");
+        if (addr_str) free(addr_str);
+        if (val_str) free(val_str);
+        if (count_str) free(count_str);
         free(expanded);
         return;
     }
 
-    uint64_t addr = strtoull(addr_str, NULL, 16);
-    uint8_t value = (uint8_t)strtoul(val_str, NULL, 10);
-    size_t count = (size_t)strtoul(count_str, NULL, 10);
+    // Use get_operand_value or strtoull to resolve the tokens
+    // This ensures that even if expand_vars didn't catch it, we try to resolve $vars
+    char* endptr;
+    uint64_t addr = get_operand_value(addr_str, &endptr);
+    // If the token wasn't a variable, get_operand_value defaults to strtoull(base 16)
+    if (addr_str[0] != '$') addr = strtoull(addr_str, NULL, 16);
 
-    memset((void*)addr, value, count);
-    printf("Set %zu bytes at 0x%llX to 0x%02x\n", count, addr, value);
+    uint8_t value = (uint8_t)get_operand_value(val_str, &endptr);
+    size_t count = (size_t)get_operand_value(count_str, &endptr);
 
-    free(addr_str); free(val_str); free(count_str);
+    if (addr != 0) {
+        memset((void*)addr, value, count);
+        printf("Set %zu bytes at 0x%llX to 0x%02x\n", count, addr, value);
+    } else {
+        printf("Error: Invalid address for memset\n");
+    }
+
+    free(addr_str); 
+    free(val_str); 
+    free(count_str);
     free(expanded);
 }
 
@@ -734,6 +904,113 @@ uint64_t handle_address_command(char* p) {
     free(name_str); 
     free(expanded);
     return result_addr;
+}
+
+size_t handle_struct_command(char* p) {
+    p = skip_ws(p + 7); // skip "/struct"
+    if (*p != '{') { printf("Expected '{'\n"); return 0; }
+    p++; // skip '{'
+
+    Struct* current = &known_structs[known_struct_count++];
+    current->member_count = 0;
+
+    // Locate the closing brace to bound our parsing
+    char* brace_end = strchr(p, '}');
+    if (!brace_end) { printf("Expected '}'\n"); return 0; }
+
+    // We'll work on a copy of the content inside { ... }
+    int body_len = brace_end - p;
+    char* struct_body = malloc(body_len + 1);
+    memcpy(struct_body, p, body_len);
+    struct_body[body_len] = '\0';
+
+    char* cursor = struct_body;
+    int offset = 0;
+    int max_align = 1;
+
+    // Manual replacement for strtok loop
+    while (cursor && *cursor != '\0') {
+        char* next_comma = strchr(cursor, ',');
+        if (next_comma) *next_comma = '\0';
+
+        char* member_str = cursor; 
+        trim(member_str);
+
+        if (strlen(member_str) > 0) {
+            char* var_name = NULL;
+            if (*member_str == '$') {
+                char* eq = strchr(member_str, '=');
+                if (eq) {
+                    *eq = '\0';
+                    var_name = strdup(member_str + 1);
+                    member_str = eq + 1;
+                    trim(member_str);
+                    trim(var_name);
+                }
+            }
+
+            char type_str[64], field_name[64];
+            int array_size = 0;
+
+            char* bracket = strchr(member_str, '[');
+            if (bracket) {
+                char* close = strchr(bracket, ']');
+                if (close) {
+                    *close = '\0';
+                    array_size = atoi(bracket + 1);
+                    *bracket = '\0';
+                }
+            }
+
+            char* space = strchr(member_str, ' ');
+            if (space) {
+                *space = '\0';
+                strcpy(type_str, member_str);
+                strcpy(field_name, space + 1);
+                trim(type_str);
+                trim(field_name);
+
+                Member* m = &current->members[current->member_count++];
+                strcpy(m->name, field_name);
+                m->type = parse_type(type_str);
+                m->array_size = array_size;
+
+                int size, align;
+                get_type_info(m->type, &size, &align);
+                if (array_size) size *= array_size;
+
+                int padding = calc_padding(offset, align);
+                offset += padding;
+
+                m->offset = offset;
+                m->size = size;
+                m->alignment = align;
+
+                if (var_name) {
+                    if (set_var(var_name, offset)) {
+                        printf("$%s = 0x%X\n", var_name, offset);
+                    }
+                    free(var_name);
+                }
+
+                offset += size;
+                if (align > max_align) max_align = align;
+            } else {
+                if (strlen(member_str) > 0) printf("Bad member: %s\n", member_str);
+            }
+        }
+
+        // Move cursor to the start of the next member
+        cursor = next_comma ? (next_comma + 1) : NULL;
+    }
+
+    current->total_size = round_up(offset, max_align);
+    current->alignment = max_align;
+
+    print_struct(current);
+    free(struct_body);
+
+    return current->total_size;
 }
 
 void handle_loaddll_command(char* p) {
@@ -969,43 +1246,70 @@ void handle_for_command(char* input_line) {
 
     p = skip_ws(endptr);
     if (*p != '{') { printf("Expected '{' after count\n"); return; }
+    p++; // skip '{'
+
+    // Locate the closing brace
+    char* brace_end = strchr(p, '}');
+    if (!brace_end) { printf("Expected '}'\n"); return; }
+
+    // Copy the content inside { ... }
+    int body_len = brace_end - p;
+    char* loop_body = malloc(body_len + 1);
+    memcpy(loop_body, p, body_len);
+    loop_body[body_len] = '\0';
 
     // 2. Execute the loop
     for (long i = 0; i < count; i++) {
-        char* cmd_ptr = p;
-        while (*cmd_ptr) {
-            cmd_ptr = skip_ws(cmd_ptr);
-            if (!*cmd_ptr) break;
-            if (*cmd_ptr != '{') {
-                printf("Expected '{' for a command in /for loop\n");
-                return;
+        // We need a fresh copy each iteration since we modify it
+        char* body_copy = strdup(loop_body);
+        char* cursor = body_copy;
+        
+        // Parse comma-separated commands (respecting parentheses)
+        while (*cursor != '\0') {
+            // Skip leading whitespace
+            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') {
+                cursor++;
             }
-            cmd_ptr++; // skip '{'
+            if (*cursor == '\0') break;
 
-            // Find the matching '}'
-            char* cmd_start = cmd_ptr;
-            int brace_level = 1;
-            while (*cmd_ptr && brace_level > 0) {
-                if (*cmd_ptr == '{') brace_level++;
-                else if (*cmd_ptr == '}') brace_level--;
-                cmd_ptr++;
+            // Find the start of this command
+            char* cmd_start = cursor;
+            
+            // Find next comma that's not inside parentheses
+            int paren_depth = 0;
+            while (*cursor != '\0') {
+                if (*cursor == '(') {
+                    paren_depth++;
+                } else if (*cursor == ')') {
+                    paren_depth--;
+                } else if (*cursor == ',' && paren_depth == 0) {
+                    break;
+                }
+                cursor++;
             }
 
-            if (brace_level != 0) {
-                printf("Mismatched braces in /for loop\n");
-                return;
+            // Extract and process this command
+            char saved = *cursor;
+            *cursor = '\0';
+            
+            char* cmd = cmd_start;
+            trim(cmd);
+            
+            if (strlen(cmd) > 0) {
+                process_command(cmd);
             }
 
-            size_t cmd_len = (size_t)(cmd_ptr - cmd_start - 1);
-            char* cmd = malloc(cmd_len + 1);
-            memcpy(cmd, cmd_start, cmd_len);
-            cmd[cmd_len] = '\0';
-
-            // Process this command
-            process_command(cmd);
-            free(cmd);
+            // Move past the comma if we found one
+            if (saved == ',') {
+                *cursor = saved;
+                cursor++;
+            }
         }
+        
+        free(body_copy);
     }
+
+    free(loop_body);
 }
 
 void handle_repeat_until_command(char* input_line) {
@@ -1013,48 +1317,75 @@ void handle_repeat_until_command(char* input_line) {
     char* p = skip_ws(input_line + 13); // skip "/repeat-until"
     if (!*p) return;
 
-    if (*p != '{') { printf("Expected '{' after count\n"); return; }
+    if (*p != '{') { printf("Expected '{' after /repeat-until\n"); return; }
+    p++; // skip '{'
 
-    // 2. Execute the loop
+    // Locate the closing brace
+    char* brace_end = strchr(p, '}');
+    if (!brace_end) { printf("Expected '}'\n"); return; }
+
+    // Copy the content inside { ... }
+    int body_len = brace_end - p;
+    char* loop_body = malloc(body_len + 1);
+    memcpy(loop_body, p, body_len);
+    loop_body[body_len] = '\0';
+
+    // 2. Execute the loop until assert fails
     while (true) {
-        char* cmd_ptr = p;
-        while (*cmd_ptr) {
-            cmd_ptr = skip_ws(cmd_ptr);
-            if (!*cmd_ptr) break;
-            if (*cmd_ptr != '{') {
-                printf("Expected '{' for a command in /for loop\n");
-                return;
+        // We need a fresh copy each iteration since we modify it
+        char* body_copy = strdup(loop_body);
+        char* cursor = body_copy;
+        
+        // Parse comma-separated commands (respecting parentheses)
+        while (*cursor != '\0') {
+            // Skip leading whitespace
+            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') {
+                cursor++;
             }
-            cmd_ptr++; // skip '{'
+            if (*cursor == '\0') break;
 
-            // Find the matching '}'
-            char* cmd_start = cmd_ptr;
-            int brace_level = 1;
-            while (*cmd_ptr && brace_level > 0) {
-                if (*cmd_ptr == '{') brace_level++;
-                else if (*cmd_ptr == '}') brace_level--;
-                cmd_ptr++;
+            // Find the start of this command
+            char* cmd_start = cursor;
+            
+            // Find next comma that's not inside parentheses
+            int paren_depth = 0;
+            while (*cursor != '\0') {
+                if (*cursor == '(') {
+                    paren_depth++;
+                } else if (*cursor == ')') {
+                    paren_depth--;
+                } else if (*cursor == ',' && paren_depth == 0) {
+                    break;
+                }
+                cursor++;
             }
 
-            if (brace_level != 0) {
-                printf("Mismatched braces in /for loop\n");
-                return;
+            // Extract and process this command
+            char saved = *cursor;
+            *cursor = '\0';
+            
+            char* cmd = cmd_start;
+            trim(cmd);
+            
+            if (strlen(cmd) > 0) {
+                process_command(cmd);
+                
+                if (assert_failed) {
+                    assert_failed = false;
+                    free(body_copy);
+                    free(loop_body);
+                    return;
+                }
             }
 
-            size_t cmd_len = (size_t)(cmd_ptr - cmd_start - 1);
-            char* cmd = malloc(cmd_len + 1);
-            memcpy(cmd, cmd_start, cmd_len);
-            cmd[cmd_len] = '\0';
-
-            // Process this command
-            process_command(cmd);
-            free(cmd);
-
-            if (assert_failed) {
-                assert_failed = false;
-                return;
+            // Move past the comma if we found one
+            if (saved == ',') {
+                *cursor = saved;
+                cursor++;
             }
         }
+        
+        free(body_copy);
     }
 }
 
@@ -1098,6 +1429,7 @@ uint64_t process_command(char* input_line) {
     // Command dispatch
     if (*p == '/') {
         if (match_cmd(p, "/quit", false))             { handle_quit_command(); }
+        else if (match_cmd(p, "/enable-normal-variables-pretty-please", false)) { normal_vars = true; return 0; }
         else if (match_cmd(p, "/alloc", true))        { return handle_alloc_command(p); }
         else if (match_cmd(p, "/free", true))         { handle_free_command(p); return 0; }
         else if (match_cmd(p, "/set", true))          { handle_set_command(p); return 0; }
@@ -1105,6 +1437,7 @@ uint64_t process_command(char* input_line) {
         else if (match_cmd(p, "/get", true))          { return handle_get_command(p); }
         else if (match_cmd(p, "/hex", true))          { handle_hex_command(p); return 0; }
         else if (match_cmd(p, "/address", true))      { return handle_address_command(p); }
+        else if (match_cmd(p, "/struct", true))       { return handle_struct_command(p); }
         else if (match_cmd(p, "/loaddll", true))      { handle_loaddll_command(p); return 0; }
         else if (match_cmd(p, "/freedll", true))      { handle_freedll_command(p); return 0; }
         else if (match_cmd(p, "/dlls", false))        { handle_dlls_command(); return 0; }
@@ -1218,6 +1551,18 @@ int main(int argc, char** argv) {
         content[fsize] = 0; // Null-terminate
         fclose(f);
 
+        for (int i = 0; i < fsize - 1; i++) {
+            if (content[i] == '^' && (content[i+1] == '\n' || content[i+1] == '\r')) {
+                content[i] = ' ';   // Replace '^' with space
+                content[i+1] = ' '; // Replace '\n' or '\r' with space
+                
+                // Handle Windows CRLF (\r\n)
+                if (i + 2 < fsize && content[i+1] == '\r' && content[i+2] == '\n') {
+                    content[i+2] = ' ';
+                }
+            }
+        }
+
         // 3. Process commands from the buffer
         char *line = strtok(content, "\n");
         while (line != NULL) {
@@ -1239,8 +1584,10 @@ int main(int argc, char** argv) {
                 "    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>\n"
                 "    Scripts by default use .ffi\n"
                 "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
-                "Usage in interactive mode:\n"
+                "Usage in interactive/script mode is the same as non-interactive except when focused on a DLL, then you don't need to specify <dll_path>\n"
+                "Additional usage in interactive/script mode:\n"
                 "    To write a comment use ; like assembly\n"
+                "    /enable-normal-variables-pretty-please Enables \"normal variables\" in scripts or interactive mode if you forgot to add the flag\n"
                 "    /loaddll <path>                     Load and focus a DLL, not required mind you\n"
                 "    /freedll <path>                     Unload a DLL from registry\n"
                 "    /alloc   <size>                     Allocate memory. Provide <size> in bytes\n"
@@ -1250,6 +1597,8 @@ int main(int argc, char** argv) {
                 "    /get     <addr>     <type>          Get a value from a memory address\n"
                 "    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n"
                 "    /address <dll_path> <name>          Get a function pointer by name\n"
+                "    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct\n"
+                "    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign them\n"
                 "    /dlls                               List loaded DLLs\n"
                 "    /for     <count>    {<cmd>}...      Repeat {commands} <count> times\n"
                 "    /repeat-until       {<cmd>}...      Repeat {commands} until assert\n"
@@ -1257,14 +1606,12 @@ int main(int argc, char** argv) {
                 "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
                 "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
                 "    $<name> = <type> <value>            Assign a variable\n"
-                "    $<name> = rhs                       Function call or command\n"
-                "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", $var1)\n"
+                "    $<name> = rhs                       Function call or valid return command\n"
+                "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", i32 $var1)\n"
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
-                "Usage in interactive mode is the same as non-interactive except when focused on a DLL,\n"
-                "then you don't need to specify <dll_path>\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
                 "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,\n"
-                "    str, wstr, voidptr are equivelant to C's \"narrow\" null-terminated string (char*), wide string (wchar_t*), generic pointer (void*, always hex)\n"
+                "    str, wstr, voidptr are equivelant to C's \"narrow\" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)\n"
                 "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).\n"
             );
             return 1;

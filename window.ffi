@@ -4,27 +4,33 @@ $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --asser
 $lpszClassName = str "mywindowclass"
 $lpWindowName = str "mywindowname"
 $hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
-$wc = /alloc 72
-/memset $wc 0 72
 
-/set $wc u32 3 ; style
-/set $wc+0x08 voidptr $lpfnWndProc ; lpfnWndProc
-; i32 0x10 cbClsExtra
-; i32 0x14 cbWndExtra
-/set $wc+0x18 voidptr $hInstance ; hInstance
-/set $wc+0x28 voidptr $hCursor
-; voidptr 0x20 hIcon
-/set $wc+0x30 voidptr 6 ; hbrBackground
-; str 0x38 lpszMenuName
-/set $wc+0x40 voidptr $lpszClassName ; lpszClassName
+$wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc, ^
+ i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon, ^
+ $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground, ^
+ voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName }
+
+$wc = /alloc $wc_size
+/memset $wc 0 $wc_size
+
+/set $wc+$style_off u32 3
+/set $wc+$lpfnWndProc_off voidptr $lpfnWndProc
+/set $wc+$hInstance_off voidptr $hInstance
+/set $wc+$hCursor_off voidptr $hCursor
+/set $wc+$hbrBackground_off voidptr 6
+/set $wc+$lpszClassName_off voidptr $lpszClassName
 
 $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
-$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, voidptr $lpWindowName, u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, voidptr $lpWindowName, ^
+ u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
 user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
 
 $msg = /alloc 48
 /memset $msg 0 48
-/repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}
+/repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero, ^
+ user32.dll i32 TranslateMessage(voidptr $msg), user32.dll i64 DispatchMessageA(voidptr $msg)}
 
 msvcrt.dll i32 printf(str "goodbye!\n")
+/free $wc
+/free $msg
 /quit

@@ -28,9 +28,11 @@ Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ..
     or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>
     Scripts by default use .ffi
     <type> can be: zero, nonzero, negative, nonnegative, not specifying means none
-Usage in interactive mode:
+Usage in interactive/script mode is the same as non-interactive except when focused on a DLL, then you don't need to specify <dll_path>
+Additional usage in interactive/script mode:
     To write a comment use ; like assembly
-    /loaddll <path>                     Load and focus a DLL
+    /enable-normal-variables-pretty-please Enables "normal variables" in scripts or interactive mode if you forgot to add the flag
+    /loaddll <path>                     Load and focus a DLL, not required mind you
     /freedll <path>                     Unload a DLL from registry
     /alloc   <size>                     Allocate memory. Provide <size> in bytes
     /free    <addr>                     Free allocated memory
@@ -39,6 +41,8 @@ Usage in interactive mode:
     /get     <addr>     <type>          Get a value from a memory address
     /hex     <addr>     [count]         Hex dump memory (default 64 bytes)
     /address <dll_path> <name>          Get a function pointer by name
+    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
+    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign them
     /dlls                               List loaded DLLs
     /for     <count>    {<cmd>}...      Repeat {commands} <count> times
     /repeat-until       {<cmd>}...      Repeat {commands} until assert
@@ -46,15 +50,13 @@ Usage in interactive mode:
 Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     --normal-variables-pretty-please allows reassignment. Not recommended.
     $<name> = <type> <value>            Assign a variable
-    $<name> = rhs                       Function call or command
-    Variables can be used as function arguments, like test.dll void print(str "%d", $var1)
+    $<name> = rhs                       Function call or valid return command
+    Variables can be used as function arguments, like test.dll void print(str "%d", i32 $var1)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
-Usage in interactive mode is the same as non-interactive except when focused on a DLL,
-then you don't need to specify <dll_path>
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
-    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,
-    float, double, null-terminated string (char*), wide string (wchar_t*), pointer (always hex), and void
-You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.
+    Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,
+    str, wstr, voidptr are equivelant to C's "narrow" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)
+You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).
 ```
 
 ## examples
@@ -117,74 +119,80 @@ $hWnd = 0x7d0f02
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --script window.ffi
 wilczurski's cool shit - script
-> $lpfnWndProc = /address test.dll WindowProcess
+> ; window.ffi
+> $lpfnWndProc = /address test.dll WindowProcessA
 [Auto-Registered: test.dll]
-0x7FFC97A01EE2
-$lpfnWndProc = 0x7FFC97A01EE2
+0x7FFB39FE16F4
+$lpfnWndProc = 0x7FFB39FE16F4
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
-Result: 0x7FF7E2150000
-$hInstance = 0x7FF7E2150000
-> $lpszClassName = /alloc 14
-0x21145208700
-$lpszClassName = 0x21145208700
-> /memset $lpszClassName 0 14
-Set 14 bytes at 0x21145208700 to 0x00
-> /set $lpszClassName str "mywindowclass"
-Value at 0x21145208700 (str): mywindowclass
+Result: 0x7FF645450000
+$hInstance = 0x7FF645450000
+> $lpszClassName = str "mywindowclass"
+$lpszClassName = 0x212EE9D7A50
+> $lpWindowName = str "mywindowname"
+$lpWindowName = 0x212EE9D7F90
 > $hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
 $hCursor = 0x10003
-> $wc = /alloc 72
-0x211452077A0
-$wc = 0x211452077A0
-> /memset $wc 0 72
-Set 72 bytes at 0x211452077A0 to 0x00
-> /set $wc u32 3 ; style
-Value at 0x211452077A0 (u32): 3
-> /set $wc+0x08 voidptr $lpfnWndProc ; lpfnWndProc
-Value at 0x211452077A8 (voidptr): 0x7FFC97A01EE2
-> ; i32 0x10 cbClsExtra
-> ; i32 0x14 cbWndExtra
-> /set $wc+0x18 voidptr $hInstance ; hInstance
-Value at 0x211452077B8 (voidptr): 0x7FF7E2150000
-> /set $wc+0x28 voidptr $hCursor
-Value at 0x211452077C8 (voidptr): 0x10003
-> ; voidptr 0x20 hIcon
-> /set $wc+0x30 voidptr 6 ; hbrBackground
-Value at 0x211452077D0 (voidptr): 0x6
-> ; str 0x38 lpszMenuName
-> /set $wc+0x40 voidptr $lpszClassName ; lpszClassName
-Value at 0x211452077E0 (voidptr): 0x21145208700
+> $wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc,    i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon,    $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground,    voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName }
+$style_off = 0x0
+$lpfnWndProc_off = 0x8
+$hInstance_off = 0x18
+$hCursor_off = 0x28
+$hbrBackground_off = 0x30
+$lpszClassName_off = 0x40
+Offset | Size | Align | Type    | Name
+------ | ---- | ----- | ------- | --------------------
+0x0000 | 4    | 4     | u32     | style
+0x0004 | (4 bytes padding)
+0x0008 | 8    | 8     | voidptr | lpfnWndProc
+0x0010 | 4    | 4     | i32     | cbClsExtra
+0x0014 | 4    | 4     | i32     | cbWndExtra
+0x0018 | 8    | 8     | voidptr | hInstance
+0x0020 | 8    | 8     | voidptr | hIcon
+0x0028 | 8    | 8     | voidptr | hCursor
+0x0030 | 8    | 8     | voidptr | hbrBackground
+0x0038 | 8    | 8     | voidptr | lpszMenuName
+0x0040 | 8    | 8     | voidptr | lpszClassName
+Total size: 72 bytes (0x48)
+Alignment: 8 bytes
+$wc_size = 0x48
+> $wc = /alloc $wc_size
+0x212EE9D3990
+$wc = 0x212EE9D3990
+> /memset $wc 0 $wc_size
+Set 72 bytes at 0x212EE9D3990 to 0x00
+> /set $wc+$style_off u32 3
+Value at 0x212EE9D3990 (u32): 3
+> /set $wc+$lpfnWndProc_off voidptr $lpfnWndProc
+Value at 0x212EE9D3998 (voidptr): 0x7FFB39FE16F4
+> /set $wc+$hInstance_off voidptr $hInstance
+Value at 0x212EE9D39A8 (voidptr): 0x7FF645450000
+> /set $wc+$hCursor_off voidptr $hCursor
+Value at 0x212EE9D39B8 (voidptr): 0x10003
+> /set $wc+$hbrBackground_off voidptr 6
+Value at 0x212EE9D39C0 (voidptr): 0x6
+> /set $wc+$lpszClassName_off voidptr $lpszClassName
+Value at 0x212EE9D39D0 (voidptr): 0x212EE9D7A50
 > $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
-Result: 49964
-$class_atom = 0xC32C
-> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
-Result: 0x2E0924
-$hWnd = 0x2E0924
+Result: 49996
+$class_atom = 0xC34C
+> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, voidptr $lpWindowName,    u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0x3B0B64
+$hWnd = 0x3B0B64
 > user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
-> $hdc = user32.dll voidptr GetDC(voidptr $hWnd) --assert=nonzero
-$hdc = 0x21011316
-> $hPen = gdi32.dll voidptr CreatePen(i32 0, i32 5, u32 0x00FF0000) --assert=nonzero
-$hPen = 0xFFFFFFFFE13008EB
-> $hOldPen = gdi32.dll voidptr SelectObject(voidptr $hdc, voidptr $hPen)
-$hOldPen = 0xB00017
-> gdi32.dll i32 MoveToEx(voidptr $hdc, i32 50, i32 20, voidptr 0)
-> gdi32.dll i32 LineTo(voidptr $hdc, i32 20, i32 80)
-> gdi32.dll i32 LineTo(voidptr $hdc, i32 80, i32 80)
-> gdi32.dll i32 LineTo(voidptr $hdc, i32 50, i32 20)
-> gdi32.dll voidptr SelectObject(voidptr $hdc, voidptr $hOldPen)
-> gdi32.dll i32 DeleteObject(voidptr $hPen)
-> user32.dll i32 ReleaseDC(voidptr $hWnd, voidptr $hdc)
 > $msg = /alloc 48
-0x2114522AF00
-$msg = 0x2114522AF00
+0x212EE9FC240
+$msg = 0x212EE9FC240
 > /memset $msg 0 48
-Set 48 bytes at 0x2114522AF00 to 0x00
-> /repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageA(voidptr $msg)}{kernel32.dll void Sleep(i32 100)}
+Set 48 bytes at 0x212EE9FC240 to 0x00
+> /repeat-until {user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,    user32.dll i32 TranslateMessage(voidptr $msg), user32.dll i64 DispatchMessageA(voidptr $msg)}
 Assertion failed for result: 0
 > msvcrt.dll i32 printf(str "goodbye!\n")
 goodbye!
-> /free $lpszClassName
-Freed memory at 0x21145208700
+> /free $wc
+Freed memory at 0x212EE9D3990
+> /free $msg
+Freed memory at 0x212EE9FC240
 > /quit
 ```
 
@@ -199,54 +207,77 @@ wilczurski's cool shit - script
 > ; window_w.ffi
 > $lpfnWndProc = /address test.dll WindowProcessW
 [Auto-Registered: test.dll]
-0x7FFAEE184B6F
-$lpfnWndProc = 0x7FFAEE184B6F
+0x7FFB39FE4B6F
+$lpfnWndProc = 0x7FFB39FE4B6F
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
-Result: 0x7FF6422E0000
-$hInstance = 0x7FF6422E0000
+Result: 0x7FF645450000
+$hInstance = 0x7FF645450000
 > $lpszClassName = wstr "mywindowclass"
-$lpszClassName = 0x21CBE667540
+$lpszClassName = 0x1F65AFC7640
 > $lpWindowName = wstr "mywindowname"
-$lpWindowName = 0x21CBE667450
+$lpWindowName = 0x1F65AFC71C0
 > $hCursor = user32.dll voidptr LoadCursorW(voidptr 0, i64 32512)
 $hCursor = 0x10003
-> $wc = /alloc 72 ; WNDCLASSW
-0x21CBE6638B0
-$wc = 0x21CBE6638B0
-> /memset $wc 0 72
-Set 72 bytes at 0x21CBE6638B0 to 0x00
-> /set $wc u32 3 ; style
-Value at 0x21CBE6638B0 (u32): 3
-> /set $wc+0x08 voidptr $lpfnWndProc ; lpfnWndProc
-Value at 0x21CBE6638B8 (voidptr): 0x7FFAEE184B6F
-> ; i32 0x10 cbClsExtra
-> ; i32 0x14 cbWndExtra
-> /set $wc+0x18 voidptr $hInstance ; hInstance
-Value at 0x21CBE6638C8 (voidptr): 0x7FF6422E0000
-> /set $wc+0x28 voidptr $hCursor
-Value at 0x21CBE6638D8 (voidptr): 0x10003
-> ; voidptr 0x20 hIcon
-> /set $wc+0x30 voidptr 6 ; hbrBackground
-Value at 0x21CBE6638E0 (voidptr): 0x6
-> ; str 0x38 lpszMenuName
-> /set $wc+0x40 voidptr $lpszClassName ; lpszClassName
-Value at 0x21CBE6638F0 (voidptr): 0x21CBE667540
+> $wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc,    i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon,    $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground,    voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName }
+$style_off = 0x0
+$lpfnWndProc_off = 0x8
+$hInstance_off = 0x18
+$hCursor_off = 0x28
+$hbrBackground_off = 0x30
+$lpszClassName_off = 0x40
+Offset | Size | Align | Type    | Name
+------ | ---- | ----- | ------- | --------------------
+0x0000 | 4    | 4     | u32     | style
+0x0004 | (4 bytes padding)
+0x0008 | 8    | 8     | voidptr | lpfnWndProc
+0x0010 | 4    | 4     | i32     | cbClsExtra
+0x0014 | 4    | 4     | i32     | cbWndExtra
+0x0018 | 8    | 8     | voidptr | hInstance
+0x0020 | 8    | 8     | voidptr | hIcon
+0x0028 | 8    | 8     | voidptr | hCursor
+0x0030 | 8    | 8     | voidptr | hbrBackground
+0x0038 | 8    | 8     | voidptr | lpszMenuName
+0x0040 | 8    | 8     | voidptr | lpszClassName
+Total size: 72 bytes (0x48)
+Alignment: 8 bytes
+$wc_size = 0x48
+> $wc = /alloc $wc_size
+0x1F65AFC3850
+$wc = 0x1F65AFC3850
+> /memset $wc 0 $wc_size
+Set 72 bytes at 0x1F65AFC3850 to 0x00
+> /set $wc+$style_off u32 3
+Value at 0x1F65AFC3850 (u32): 3
+> /set $wc+$lpfnWndProc_off voidptr $lpfnWndProc
+Value at 0x1F65AFC3858 (voidptr): 0x7FFB39FE4B6F
+> /set $wc+$hInstance_off voidptr $hInstance
+Value at 0x1F65AFC3868 (voidptr): 0x7FF645450000
+> /set $wc+$hCursor_off voidptr $hCursor
+Value at 0x1F65AFC3878 (voidptr): 0x10003
+> /set $wc+$hbrBackground_off voidptr 6
+Value at 0x1F65AFC3880 (voidptr): 0x6
+> /set $wc+$lpszClassName_off voidptr $lpszClassName
+Value at 0x1F65AFC3890 (voidptr): 0x1F65AFC7640
 > $class_atom = user32.dll u16 RegisterClassW(voidptr $wc) --print-result --assert=nonzero
-Result: 49473
-$class_atom = 0xC141
-> $hWnd = user32.dll voidptr CreateWindowExW(u32 0, voidptr $lpszClassName, voidptr $lpWindowName, u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
-Result: 0xB0B60
-$hWnd = 0xB0B60
+Result: 49996
+$class_atom = 0xC34C
+> $hWnd = user32.dll voidptr CreateWindowExW(u32 0, voidptr $lpszClassName, voidptr $lpWindowName,    u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0x3D0B64
+$hWnd = 0x3D0B64
 > user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
 > $msg = /alloc 48
-0x21CBE6890A0
-$msg = 0x21CBE6890A0
+0x1F65AFE9A10
+$msg = 0x1F65AFE9A10
 > /memset $msg 0 48
-Set 48 bytes at 0x21CBE6890A0 to 0x00
-> /repeat-until {user32.dll i32 GetMessageW(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageW(voidptr $msg)}
+Set 48 bytes at 0x1F65AFE9A10 to 0x00
+> /repeat-until {user32.dll i32 GetMessageW(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,    user32.dll i32 TranslateMessage(voidptr $msg), user32.dll i64 DispatchMessageW(voidptr $msg)}
 Assertion failed for result: 0
 > msvcrt.dll i32 wprintf(wstr "goodbye!\n")
 goodbye!
+> /free $wc
+Freed memory at 0x1F65AFC3850
+> /free $msg
+Freed memory at 0x1F65AFE9A10
 > /quit
 ```
 
@@ -255,17 +286,19 @@ goodbye!
 <details>
 <summary><b>starting tf2</b></summary>
 
-rename the executable to tf.exe
+because tf2 reads from GetCommandLineA and not from lpCmdLine we have to pass parameters
+ for LauncherMain in our parameters and a dummy string in LauncherMain.  
+idiots.
 
 ```
 D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
 
-D:\SteamLibrary\steamapps\common\Team Fortress 2>tf --interactive
+D:\SteamLibrary\steamapps\common\Team Fortress 2>caller --interactive -game tf
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
-$hInstance = 0x7FF765AB0000
-> launcher.dll i32 LauncherMain(voidptr $hInstance, voidptr 0, str "-game tf", i32 1) --print-result
+$hInstance = 0x7FF63DAD0000
+> launcher.dll i32 LauncherMain(voidptr $hInstance, voidptr 0, voidptr 0, i32 1)
 Setting breakpad minidump AppID = 440
 SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded no]
 Using breakpad crash handler
@@ -282,8 +315,7 @@ SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loa
 SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
 Fontconfig error: Cannot load default config file: No such file: (null)
 Unable to remove d:\steamlibrary\steamapps\common\team fortress 2\tf\textwindow_temp.html!
-Result: 0
->
+> /quit
 ```
 
 </details>
