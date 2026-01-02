@@ -13,8 +13,8 @@ typedef enum {
     TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
     TYPE_F32, TYPE_F64,
     TYPE_STR, TYPE_WSTR,
-    TYPE_VOIDPTR, TYPE_VOID
-} ArgType;
+    TYPE_PTR, TYPE_VOID
+} TypeKind;
 
 typedef enum {
     ASSERT_NONE,
@@ -25,14 +25,14 @@ typedef enum {
 } AssertType;
 
 typedef struct {
-    ArgType type;
+    TypeKind type;
     uint64_t value;
 } Argument;
 
 typedef struct {
     char dll_path[256];
     char func_name[128];
-    ArgType return_type;
+    TypeKind return_type;
     AssertType assert_type;
     Argument args[16];
     int arg_count;
@@ -259,25 +259,25 @@ char* expand_vars(const char* input) {
 }
 
 // ------------------------ Helpers ------------------------
-ArgType parse_type(const char* str) {
-    if (strcmp(str,"i8")==0) return TYPE_I8;
-    else if (strcmp(str,"i16")==0) return TYPE_I16;
-    else if (strcmp(str,"i32")==0) return TYPE_I32;
-    else if (strcmp(str,"i64")==0) return TYPE_I64;
-    else if (strcmp(str,"u8")==0) return TYPE_U8;
-    else if (strcmp(str,"u16")==0) return TYPE_U16;
-    else if (strcmp(str,"u32")==0) return TYPE_U32;
-    else if (strcmp(str,"u64")==0) return TYPE_U64;
-    else if (strcmp(str,"f32")==0) return TYPE_F32;
-    else if (strcmp(str,"f64")==0) return TYPE_F64;
+TypeKind parse_type(const char* str) {
+    if (strcmp(str,"i8")==0 || strcmp(str,"int8_t")==0) return TYPE_I8;
+    else if (strcmp(str,"i16")==0 || strcmp(str,"int16_t")==0) return TYPE_I16;
+    else if (strcmp(str,"i32")==0 || strcmp(str,"int32_t")==0) return TYPE_I32;
+    else if (strcmp(str,"i64")==0 || strcmp(str,"int64_t")==0) return TYPE_I64;
+    else if (strcmp(str,"u8")==0 || strcmp(str,"uint8_t")==0) return TYPE_U8;
+    else if (strcmp(str,"u16")==0 || strcmp(str,"uint16_t")==0) return TYPE_U16;
+    else if (strcmp(str,"u32")==0 || strcmp(str,"uint32_t")==0) return TYPE_U32;
+    else if (strcmp(str,"u64")==0 || strcmp(str,"uint64_t")==0) return TYPE_U64;
+    else if (strcmp(str,"f32")==0 || strcmp(str,"float")==0) return TYPE_F32;
+    else if (strcmp(str,"f64")==0 || strcmp(str,"double")==0) return TYPE_F64;
     else if (strcmp(str,"str")==0) return TYPE_STR;
     else if (strcmp(str,"wstr")==0) return TYPE_WSTR;
-    else if (strcmp(str,"voidptr")==0) return TYPE_VOIDPTR;
+    else if (strcmp(str,"voidptr")==0) return TYPE_PTR;
     else if (strcmp(str,"void")==0) return TYPE_VOID;
     return TYPE_VOID;
 }
 
-uint64_t parse_argument_value(ArgType type, const char* str) {
+uint64_t parse_argument_value(TypeKind type, const char* str) {
     switch(type){
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64:
             return (uint64_t)strtoll(str,NULL,0);
@@ -349,12 +349,12 @@ uint64_t parse_argument_value(ArgType type, const char* str) {
             free(dest); // Free the narrow temp buffer
             return (uint64_t)wdest;
         }
-        case TYPE_VOIDPTR: return strtoull(str,NULL,16);
+        case TYPE_PTR: return strtoull(str,NULL,16);
         default: return 0;
     }
 }
 
-void format_result(uint64_t result, ArgType type, char* buf, size_t size){
+void format_result(uint64_t result, TypeKind type, char* buf, size_t size){
     switch(type){
         case TYPE_I8: snprintf(buf,size,"%d",(int8_t)result); break;
         case TYPE_I16: snprintf(buf,size,"%d",(int16_t)result); break;
@@ -378,7 +378,7 @@ void format_result(uint64_t result, ArgType type, char* buf, size_t size){
             }
             break;
         }
-        case TYPE_VOIDPTR: snprintf(buf,size,"0x%llX",result); break;
+        case TYPE_PTR: snprintf(buf,size,"0x%llX",result); break;
         case TYPE_VOID: snprintf(buf,size,"(void)"); break;
     }
 }
@@ -437,7 +437,7 @@ void parse_arguments(char** s, CallSpec* spec){
         char* val_token = read_token(s);
         if(!type_token || !val_token) break;
 
-        ArgType t = parse_type(type_token);
+        TypeKind t = parse_type(type_token);
         spec->args[spec->arg_count].type = t;
         spec->args[spec->arg_count].value = parse_argument_value(t,val_token);
         spec->arg_count++;
@@ -540,7 +540,7 @@ void handle_set_command(char* p) {
     }
 
     uint64_t addr = strtoull(addr_str, NULL, 16);
-    ArgType type = parse_type(type_str);
+    TypeKind type = parse_type(type_str);
     uint64_t value = parse_argument_value(type, val_str);
 
     switch(type){
@@ -562,7 +562,7 @@ void handle_set_command(char* p) {
             // Ideally we should free((void*)value) here because parse_argument_value allocated it
             // free((void*)value); 
             break;
-        case TYPE_VOIDPTR: *(uint64_t*)addr = value; break;
+        case TYPE_PTR: *(uint64_t*)addr = value; break;
         default: printf("unsupported\n"); break;
     }
     
@@ -611,7 +611,7 @@ uint64_t handle_get_command(char* p) {
     }
 
     uint64_t addr = strtoull(addr_str, NULL, 16);
-    ArgType type = parse_type(type_str);
+    TypeKind type = parse_type(type_str);
 
     uint64_t value = 0;
     switch(type){
@@ -627,7 +627,7 @@ uint64_t handle_get_command(char* p) {
         case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
         case TYPE_STR: value = addr; break;
         case TYPE_WSTR: value = addr; break;
-        case TYPE_VOIDPTR: value = *(uint64_t*)addr; break;
+        case TYPE_PTR: value = *(uint64_t*)addr; break;
         default: printf("unsupported\n"); break;
     }
     
@@ -1116,7 +1116,7 @@ uint64_t process_command(char* input_line) {
     char* temp_p = p;
     char* first_token = read_token(&temp_p);
     if (first_token) {
-        ArgType t = parse_type(first_token);
+        TypeKind t = parse_type(first_token);
         
         // Only enter if there is a value AND it's not a function call
         if (t != TYPE_VOID) { 
@@ -1263,9 +1263,9 @@ int main(int argc, char** argv) {
                 "Usage in interactive mode is the same as non-interactive except when focused on a DLL,\n"
                 "then you don't need to specify <dll_path>\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
-                "    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,\n"
-                "    float, double, null-terminated string (char*), wide string (wchar_t*), pointer (always hex), and void\n"
-                "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.\n"
+                "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,\n"
+                "    str, wstr, voidptr are equivelant to C's \"narrow\" null-terminated string (char*), wide string (wchar_t*), generic pointer (void*, always hex)\n"
+                "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).\n"
             );
             return 1;
         }
