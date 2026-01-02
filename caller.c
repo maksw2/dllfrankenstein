@@ -304,10 +304,9 @@ uint64_t parse_argument_value(TypeKind type, const char* str) {
         case TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64:
             return (uint64_t)strtoull(str,NULL,0);
         case TYPE_F32: {
-            float f_val = (float)atof(str); // Parse to float
-            double d_val = (double)f_val;   // Promote float to double
-            uint64_t u64_bits;
-            memcpy(&u64_bits, &d_val, sizeof(double)); // Get 64-bit pattern of the double
+            float f_val = (float)atof(str);
+            uint64_t u64_bits = 0; // Important: Clear high bits
+            memcpy(&u64_bits, &f_val, sizeof(float)); // Copy only 4 bytes
             return u64_bits;
         }
         case TYPE_F64: {
@@ -1198,6 +1197,9 @@ uint64_t handle_function_call(char* input_line) {
             float_mask |= (1 << j);
         }
     }
+    if (spec.return_type == TYPE_F32 || spec.return_type == TYPE_F64) {
+        float_mask |= 0x80000000; // Set the 31st bit
+    }
 
     //printf("DEBUG: Jumping to %p with %d args\n", func_ptr, spec.arg_count);
     uint64_t result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
@@ -1612,6 +1614,7 @@ int main(int argc, char** argv) {
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
                 "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,\n"
                 "    str, wstr, voidptr are equivelant to C's \"narrow\" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)\n"
+                "    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw bytes). No validation or conversion is performed.\n"
                 "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).\n"
             );
             return 1;

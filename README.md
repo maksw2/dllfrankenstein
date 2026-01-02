@@ -56,6 +56,7 @@ Variables by default are Write-Once Read-Many, no shadowing, no scopes.
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,
     str, wstr, voidptr are equivelant to C's "narrow" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)
+    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw bytes). No validation or conversion is performed.
 You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).
 ```
 

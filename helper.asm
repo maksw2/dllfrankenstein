@@ -114,6 +114,12 @@ arg3_float:
 do_call:
     call rbx
 
+    bt r12d, 31               ; Bit test bit 31
+    jnc ret_integer           ; If carry clear (bit not set), return integer
+    movq rax, xmm0            ; Move float/double bits from XMM0 to RAX
+
+ret_integer:
+
     ; --- Epilogue ---
     mov rsp, rbp        ; Clean up dynamic stack & restore RSP to saved regs
     pop r13             ; Pop in reverse order of pushes

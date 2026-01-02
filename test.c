@@ -1,6 +1,5 @@
 #include <windows.h>
 
-// This is the entry point. It's called when the DLL is loaded or unloaded.
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
         case DLL_PROCESS_ATTACH: // Initialize once here
@@ -11,26 +10,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     return TRUE;
 }
 
-// The __declspec(dllexport) tells the linker to put this in the export table.
 extern __declspec(dllexport) int Add(int a, int b) {
     return a + b;
 }
 
-extern __declspec(dllexport) int Test() {
-    return 21;
-}
-
-extern __declspec(dllexport) const char* Test2(int a) {
-    if (a == 5)
-        return "mi bombo";
-    return "no";
-}
-
-extern __declspec(dllexport) void print(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
+extern __declspec(dllexport) float Addf(float a, float b) {
+    return a + b;
 }
 
 extern __declspec(dllexport) const char* sprint(const char* format, ...) {
