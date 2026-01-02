@@ -1,12 +1,12 @@
 # dllfrankenstein – call any DLL function anytime anywhere
 
-dllfrankenstein lets you call arbitrary DLL functions with explicit type control, direct memory access, and an optional interactive REPL.  
+dllfrankenstein lets you call arbitrary DLL functions with explicit type control, direct memory access, and a REPL.  
 scary shit
 
 ## warning
 
 This tool is unsafe by design.
-Lying about signatures will corrupt the stack or crash the process.
+Lying about signatures will most likely crash the process or corrupt the stack.
 
 ## how 2 use it
 
@@ -51,20 +51,30 @@ Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Usage in interactive mode is the same as non-interactive except when focused on a DLL,
 then you don't need to specify <dll_path>
-Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void
+Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,
-    float, double, null-terminated string, pointer (always hex), and void
+    float, double, null-terminated string (char*), wide string (wchar_t*), pointer (always hex), and void
 You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.
 ```
 
 ## examples
 
 <details>
+<summary><b>a simple messagebox</b></summary>
+
+```
+caller.exe user32.dll i32 MessageBoxA(voidptr 0, str "hi", str "title", u32 0)
+caller.exe user32.dll i32 MessageBoxW(voidptr 0, wstr "hi", wstr "title", u32 0)
+```
+
+</details>
+
+<details>
 <summary><b>creating a win32 window</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
---- Interactive DLL Caller ---
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $lpfnWndProc = /address user32.dll DefWindowProcA
 0x7ffcde461870
@@ -102,10 +112,11 @@ $hWnd = 0x7d0f02
 </details>
 
 <details>
-<summary><b>running a script</b></summary>
+<summary><b>running a script; creating a win32 window</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --script window.ffi
+wilczurski's cool shit - script
 > $lpfnWndProc = /address test.dll WindowProcess
 [Auto-Registered: test.dll]
 0x7FFC97A01EE2
@@ -180,6 +191,68 @@ Freed memory at 0x21145208700
 </details>
 
 <details>
+<summary><b>running a script; creating a win32 window using wide strings</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --script window_w.ffi
+wilczurski's cool shit - script
+> ; window_w.ffi
+> $lpfnWndProc = /address test.dll WindowProcessW
+[Auto-Registered: test.dll]
+0x7FFAEE184B6F
+$lpfnWndProc = 0x7FFAEE184B6F
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
+Result: 0x7FF6422E0000
+$hInstance = 0x7FF6422E0000
+> $lpszClassName = wstr "mywindowclass"
+$lpszClassName = 0x21CBE667540
+> $lpWindowName = wstr "mywindowname"
+$lpWindowName = 0x21CBE667450
+> $hCursor = user32.dll voidptr LoadCursorW(voidptr 0, i64 32512)
+$hCursor = 0x10003
+> $wc = /alloc 72 ; WNDCLASSW
+0x21CBE6638B0
+$wc = 0x21CBE6638B0
+> /memset $wc 0 72
+Set 72 bytes at 0x21CBE6638B0 to 0x00
+> /set $wc u32 3 ; style
+Value at 0x21CBE6638B0 (u32): 3
+> /set $wc+0x08 voidptr $lpfnWndProc ; lpfnWndProc
+Value at 0x21CBE6638B8 (voidptr): 0x7FFAEE184B6F
+> ; i32 0x10 cbClsExtra
+> ; i32 0x14 cbWndExtra
+> /set $wc+0x18 voidptr $hInstance ; hInstance
+Value at 0x21CBE6638C8 (voidptr): 0x7FF6422E0000
+> /set $wc+0x28 voidptr $hCursor
+Value at 0x21CBE6638D8 (voidptr): 0x10003
+> ; voidptr 0x20 hIcon
+> /set $wc+0x30 voidptr 6 ; hbrBackground
+Value at 0x21CBE6638E0 (voidptr): 0x6
+> ; str 0x38 lpszMenuName
+> /set $wc+0x40 voidptr $lpszClassName ; lpszClassName
+Value at 0x21CBE6638F0 (voidptr): 0x21CBE667540
+> $class_atom = user32.dll u16 RegisterClassW(voidptr $wc) --print-result --assert=nonzero
+Result: 49473
+$class_atom = 0xC141
+> $hWnd = user32.dll voidptr CreateWindowExW(u32 0, voidptr $lpszClassName, voidptr $lpWindowName, u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+Result: 0xB0B60
+$hWnd = 0xB0B60
+> user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
+> $msg = /alloc 48
+0x21CBE6890A0
+$msg = 0x21CBE6890A0
+> /memset $msg 0 48
+Set 48 bytes at 0x21CBE6890A0 to 0x00
+> /repeat-until {user32.dll i32 GetMessageW(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero}{user32.dll i32 TranslateMessage(voidptr $msg)}{user32.dll i64 DispatchMessageW(voidptr $msg)}
+Assertion failed for result: 0
+> msvcrt.dll i32 wprintf(wstr "goodbye!\n")
+goodbye!
+> /quit
+```
+
+</details>
+
+<details>
 <summary><b>starting tf2</b></summary>
 
 rename the executable to tf.exe
@@ -188,7 +261,7 @@ rename the executable to tf.exe
 D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
 
 D:\SteamLibrary\steamapps\common\Team Fortress 2>tf --interactive
---- Interactive DLL Caller ---
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
 $hInstance = 0x7FF765AB0000
@@ -219,8 +292,8 @@ Result: 0
 <summary><b>having fun with memory</b></summary>
 
 ```
-C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
---- Interactive DLL Caller ---
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > /alloc 128
 Allocated 128 bytes at 0x000002061136BF40
@@ -232,7 +305,7 @@ Freed memory at 0x000002061136BF40
 > /quit
 
 C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
---- Interactive DLL Caller ---
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > /alloc 128
 Allocated 128 bytes at 0x0000024F2C245990
@@ -262,8 +335,8 @@ remember to /memset your memory kids!
 <summary><b>assertions</b></summary>
 
 ```
-C:\Users\maksw\Documents\dllfrankenstein>caller --interactive
---- Interactive DLL Caller ---
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > test.dll i32 Add(i32 0, i32 0) --print-result --assert=zero
 Result: 0
@@ -289,7 +362,7 @@ C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\Sys
 C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Beep
         117   74 0004F780 Beep
 C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
---- Interactive DLL Caller ---
+wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > kernel32.dll void #1481(i32 5000)
 > kernel32.dll void #117(i32 750, i32 300)
@@ -324,7 +397,7 @@ Q: It crashed!
 A: Liar liar pants on fire.
 
 Q: No i did not!  
-A: Open an issue. Unless you used --normal-variables-pretty-please, then go away.
+A: Open an issue. Unless you used --normal-variables-pretty-please, then figure it out yourself.
 
 Q: Does it support all calling conventions?  
 A: Technically.
@@ -333,7 +406,7 @@ Q: Are there bugs?
 A: Features in progress.
 
 Q: Can I do pointer math?  
-A: Yes, basic arithmetic like $base + 0x40 works.
+A: Yes, basic math works.
 
 Q: What is the scale of pointer math?  
 A: Bytes. Always.

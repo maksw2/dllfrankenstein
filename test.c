@@ -63,7 +63,7 @@ extern __declspec(dllexport) const char* sprint(const char* format, ...) {
     return buffer;
 }
 
-extern __declspec(dllexport) LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+extern __declspec(dllexport) LRESULT CALLBACK WindowProcessA(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_DESTROY:
             // Post a quit message to the message queue
@@ -89,4 +89,32 @@ extern __declspec(dllexport) LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg,
 
     // Let Windows handle any messages we don't care about
     return DefWindowProcA(hWnd, msg, wp, lp);
+}
+
+extern __declspec(dllexport) LRESULT CALLBACK WindowProcessW(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_DESTROY:
+            // Post a quit message to the message queue
+            PostQuitMessage(0);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(255, 0, 0));
+            HGDIOBJ hOldPen = SelectObject(hdc, hPen);
+            MoveToEx(hdc, 50, 20, NULL);
+            LineTo(hdc, 20, 80);
+            LineTo(hdc, 80, 80);
+            LineTo(hdc, 50, 20);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hPen);
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+    }
+
+    // Let Windows handle any messages we don't care about
+    return DefWindowProcW(hWnd, msg, wp, lp);
 }

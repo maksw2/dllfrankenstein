@@ -12,7 +12,8 @@ typedef enum {
     TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64,
     TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
     TYPE_F32, TYPE_F64,
-    TYPE_STR, TYPE_VOIDPTR, TYPE_VOID
+    TYPE_STR, TYPE_WSTR,
+    TYPE_VOIDPTR, TYPE_VOID
 } ArgType;
 
 typedef enum {
@@ -259,19 +260,20 @@ char* expand_vars(const char* input) {
 
 // ------------------------ Helpers ------------------------
 ArgType parse_type(const char* str) {
-    if(strcmp(str,"i8")==0) return TYPE_I8;
-    if(strcmp(str,"i16")==0) return TYPE_I16;
-    if(strcmp(str,"i32")==0) return TYPE_I32;
-    if(strcmp(str,"i64")==0) return TYPE_I64;
-    if(strcmp(str,"u8")==0) return TYPE_U8;
-    if(strcmp(str,"u16")==0) return TYPE_U16;
-    if(strcmp(str,"u32")==0) return TYPE_U32;
-    if(strcmp(str,"u64")==0) return TYPE_U64;
-    if(strcmp(str,"f32")==0) return TYPE_F32;
-    if(strcmp(str,"f64")==0) return TYPE_F64;
-    if(strcmp(str,"str")==0) return TYPE_STR;
-    if(strcmp(str,"voidptr")==0) return TYPE_VOIDPTR;
-    if(strcmp(str,"void")==0) return TYPE_VOID;
+    if (strcmp(str,"i8")==0) return TYPE_I8;
+    else if (strcmp(str,"i16")==0) return TYPE_I16;
+    else if (strcmp(str,"i32")==0) return TYPE_I32;
+    else if (strcmp(str,"i64")==0) return TYPE_I64;
+    else if (strcmp(str,"u8")==0) return TYPE_U8;
+    else if (strcmp(str,"u16")==0) return TYPE_U16;
+    else if (strcmp(str,"u32")==0) return TYPE_U32;
+    else if (strcmp(str,"u64")==0) return TYPE_U64;
+    else if (strcmp(str,"f32")==0) return TYPE_F32;
+    else if (strcmp(str,"f64")==0) return TYPE_F64;
+    else if (strcmp(str,"str")==0) return TYPE_STR;
+    else if (strcmp(str,"wstr")==0) return TYPE_WSTR;
+    else if (strcmp(str,"voidptr")==0) return TYPE_VOIDPTR;
+    else if (strcmp(str,"void")==0) return TYPE_VOID;
     return TYPE_VOID;
 }
 
@@ -294,7 +296,8 @@ uint64_t parse_argument_value(ArgType type, const char* str) {
             memcpy(&u64_bits, &d_val, sizeof(double)); // Get 64-bit pattern of the double
             return u64_bits;
         }
-        case TYPE_STR: {
+        case TYPE_STR: 
+        case TYPE_WSTR: {
             int len = (int)strlen(str);
             char* src = (char*)str;
             int start = 0, end = len;
@@ -305,7 +308,10 @@ uint64_t parse_argument_value(ArgType type, const char* str) {
                 end = len - 1;
             }
 
+            // Allocate temporary narrow buffer
             char* dest = malloc(end - start + 1);
+            if (!dest) return 0;
+
             int j = 0;
             for (int i = start; i < end; i++) {
                 if (src[i] == '\\' && i + 1 < end) {
@@ -315,14 +321,33 @@ uint64_t parse_argument_value(ArgType type, const char* str) {
                         case 't': dest[j++] = '\t'; i++; break;
                         case '\\': dest[j++] = '\\'; i++; break;
                         case '\"': dest[j++] = '\"'; i++; break;
-                        default:  dest[j++] = src[i]; break; // Keep as literal if unknown
+                        default:  dest[j++] = src[i]; break; 
                     }
                 } else {
                     dest[j++] = src[i];
                 }
             }
             dest[j] = '\0';
-            return (uint64_t)dest;
+
+            // If it is just a normal string, return it
+            if (type == TYPE_STR) {
+                return (uint64_t)dest;
+            }
+
+            // If it is a WSTR, convert to UTF-16
+            // Calculate required length
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, dest, -1, NULL, 0);
+            wchar_t* wdest = malloc(wlen * sizeof(wchar_t));
+            if (!wdest) {
+                free(dest);
+                return 0;
+            }
+            
+            // Perform conversion
+            MultiByteToWideChar(CP_UTF8, 0, dest, -1, wdest, wlen);
+            
+            free(dest); // Free the narrow temp buffer
+            return (uint64_t)wdest;
         }
         case TYPE_VOIDPTR: return strtoull(str,NULL,16);
         default: return 0;
@@ -342,6 +367,17 @@ void format_result(uint64_t result, ArgType type, char* buf, size_t size){
         case TYPE_F32: { float f; memcpy(&f,&result,sizeof(float)); snprintf(buf,size,"%f",f); break; }
         case TYPE_F64: { double d; memcpy(&d,&result,sizeof(double)); snprintf(buf,size,"%f",d); break; }
         case TYPE_STR: snprintf(buf,size,"%s",(char*)result); break;
+        case TYPE_WSTR: {
+            if (result == 0) {
+                snprintf(buf, size, "(null)");
+            } else {
+                // Convert Wide to Narrow for display
+                WideCharToMultiByte(CP_UTF8, 0, (wchar_t*)result, -1, buf, (int)size, NULL, NULL);
+                // Ensure null termination in case buffer was too small
+                buf[size - 1] = '\0';
+            }
+            break;
+        }
         case TYPE_VOIDPTR: snprintf(buf,size,"0x%llX",result); break;
         case TYPE_VOID: snprintf(buf,size,"(void)"); break;
     }
@@ -521,6 +557,11 @@ void handle_set_command(char* p) {
         case TYPE_STR: 
             if (value != 0) strcpy((char*)addr, (char*)value);
             break;
+        case TYPE_WSTR:
+            if (value != 0) wcscpy((wchar_t*)addr, (wchar_t*)value);
+            // Ideally we should free((void*)value) here because parse_argument_value allocated it
+            // free((void*)value); 
+            break;
         case TYPE_VOIDPTR: *(uint64_t*)addr = value; break;
         default: printf("unsupported\n"); break;
     }
@@ -585,6 +626,7 @@ uint64_t handle_get_command(char* p) {
         case TYPE_F32: { float f = *(float*)addr; memcpy(&value,&f,sizeof(float)); } break;
         case TYPE_F64: { double d = *(double*)addr; memcpy(&value,&d,sizeof(double)); } break;
         case TYPE_STR: value = addr; break;
+        case TYPE_WSTR: value = addr; break;
         case TYPE_VOIDPTR: value = *(uint64_t*)addr; break;
         default: printf("unsupported\n"); break;
     }
@@ -863,7 +905,7 @@ uint64_t handle_function_call(char* input_line) {
         printf("Error: Could not resolve function '%s'.\n", spec.func_name);
         // Clean up arguments before returning
         for (int j = 0; j < spec.arg_count; j++) {
-            if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
+            if (spec.args[j].type == TYPE_STR && spec.args[j].type == TYPE_WSTR) free((void*)spec.args[j].value);
         }
         free(expanded);
         if (!interactive)
@@ -908,7 +950,7 @@ uint64_t handle_function_call(char* input_line) {
 
     // Cleanup
     for (int j = 0; j < spec.arg_count; j++) {
-        if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
+        if (spec.args[j].type == TYPE_STR && spec.args[j].type == TYPE_WSTR) free((void*)spec.args[j].value);
     }
     
     free(expanded);
@@ -1076,14 +1118,34 @@ uint64_t process_command(char* input_line) {
     if (first_token) {
         ArgType t = parse_type(first_token);
         
-        // Only enter if there is a value
+        // Only enter if there is a value AND it's not a function call
         if (t != TYPE_VOID) { 
+            // We need to peek ahead. If the next token contains '(' or 
+            // is followed by '(', it is a function call, NOT a literal value.
             char* val_str = read_token(&temp_p);
+            
+            bool looks_like_func = false;
+            
             if (val_str) {
-                uint64_t result = parse_argument_value(t, val_str);
+                // Case 1: "printf(" (token contains parenthesis)
+                if (strchr(val_str, '(')) {
+                    looks_like_func = true;
+                } 
+                // Case 2: "printf (" (next char is parenthesis)
+                else {
+                   char* next = skip_ws(temp_p);
+                   if (*next == '(') {
+                       looks_like_func = true;
+                   }
+                }
+
+                if (!looks_like_func) {
+                    uint64_t result = parse_argument_value(t, val_str);
+                    free(val_str);
+                    free(first_token);
+                    return result; 
+                }
                 free(val_str);
-                free(first_token);
-                return result; 
             }
         }
         free(first_token);
@@ -1094,11 +1156,18 @@ uint64_t process_command(char* input_line) {
 }
 
 int main(int argc, char** argv) {
+    bool help = false;
     const char* script_file = NULL;
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--interactive") == 0) {
+        if (strcmp(argv[i], "--help") == 0) {
+            help = true;
+            interactive = false;
+            script_file = NULL;
+            break;
+        }
+        else if (strcmp(argv[i], "--interactive") == 0) {
             interactive = true;
             if (i + 1 < argc && strcmp(argv[i + 1], "--normal-variables-pretty-please") == 0) {
                 normal_vars = true;
@@ -1116,7 +1185,7 @@ int main(int argc, char** argv) {
     }
 
     if (interactive) {
-        printf("--- Interactive DLL Caller ---\n");
+        printf("wilczurski's cool shit - repl\n");
         printf("Enter command or /quit to exit.\n");
         char line[1024];
         while (1) {
@@ -1126,6 +1195,7 @@ int main(int argc, char** argv) {
             process_command(line);
         }
     } else if (script_file) {
+        printf("wilczurski's cool shit - script\n");
         FILE* f = fopen(script_file, "r");
         if (!f) {
             fprintf(stderr, "Failed to open script file: %s\n", script_file);
@@ -1161,7 +1231,7 @@ int main(int argc, char** argv) {
 
         free(content);
     } else {
-        if (argc < 2) {
+        if (argc < 2 || help) {
             printf(
                 "wilczurski's cool shit - repl + ffi\n"
                 "Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
@@ -1171,7 +1241,7 @@ int main(int argc, char** argv) {
                 "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
                 "Usage in interactive mode:\n"
                 "    To write a comment use ; like assembly\n"
-                "    /loaddll <path>                     Load and focus a DLL\n"
+                "    /loaddll <path>                     Load and focus a DLL, not required mind you\n"
                 "    /freedll <path>                     Unload a DLL from registry\n"
                 "    /alloc   <size>                     Allocate memory. Provide <size> in bytes\n"
                 "    /free    <addr>                     Free allocated memory\n"
@@ -1192,13 +1262,14 @@ int main(int argc, char** argv) {
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
                 "Usage in interactive mode is the same as non-interactive except when focused on a DLL,\n"
                 "then you don't need to specify <dll_path>\n"
-                "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, voidptr, void\n"
+                "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
                 "    Equivalent to int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t,\n"
-                "    float, double, null-terminated string, pointer (always hex), and void\n"
+                "    float, double, null-terminated string (char*), wide string (wchar_t*), pointer (always hex), and void\n"
                 "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type.\n"
             );
             return 1;
         }
+        printf("wilczurski's cool shit - one-shot\n");
 
         // Reconstruct the command line excluding the program name for the parser
         char* p = GetCommandLineA();

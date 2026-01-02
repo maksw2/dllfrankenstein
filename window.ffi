@@ -1,7 +1,8 @@
 ; window.ffi
-$lpfnWndProc = /address test.dll WindowProcess
+$lpfnWndProc = /address test.dll WindowProcessA
 $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0) --print-result --assert=nonzero
 $lpszClassName = str "mywindowclass"
+$lpWindowName = str "mywindowname"
 $hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
 $wc = /alloc 72
 /memset $wc 0 72
@@ -18,7 +19,7 @@ $wc = /alloc 72
 /set $wc+0x40 voidptr $lpszClassName ; lpszClassName
 
 $class_atom = user32.dll u16 RegisterClassA(voidptr $wc) --print-result --assert=nonzero
-$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "mywindowname", u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
+$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, voidptr $lpWindowName, u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --print-result --assert=nonzero
 user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
 
 $msg = /alloc 48
