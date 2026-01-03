@@ -55,6 +55,7 @@ Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     $<name> = <command>         Capture command/function output into variable
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
     *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
+    $i is a reserved variable for loop iterations. It is intentionally not reset on break
     Variables can be used as function arguments, like test.dll void print(str "%d", i32 $var1)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void

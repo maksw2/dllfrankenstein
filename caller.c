@@ -62,6 +62,12 @@ typedef struct Struct {
     int alignment;
 } Struct;
 
+typedef struct {
+    char** commands;
+    int count;
+    char* buffer;
+} TokenizedLoop;
+
 Struct known_structs[256];
 int known_struct_count = 0;
 
@@ -111,7 +117,7 @@ bool set_var(const char* name, uint64_t value) {
     if (g_var_count >= 128) {
         printf("Error: Maximum number of variables reached\n");
         if (!interactive)
-                exit(1);
+            exit(1);
         return false;
     }
     
@@ -1272,165 +1278,134 @@ uint64_t handle_function_call(char* input_line) {
     return (spec.return_type != TYPE_VOID) ? result : 0;
 }
 
+// Helper to parse the { cmd1, cmd2 } block into an array of strings
+TokenizedLoop tokenize_body(const char* p, char* brace_end) {
+    TokenizedLoop tl;
+    int len = brace_end - p;
+    tl.buffer = malloc(len + 1);
+    memcpy(tl.buffer, p, len);
+    tl.buffer[len] = '\0';
+
+    // Initial allocation for command pointers
+    tl.commands = malloc(sizeof(char*) * 16); 
+    tl.count = 0;
+    int capacity = 16;
+
+    char* cursor = tl.buffer;
+    while (*cursor) {
+        // Skip whitespace
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (!*cursor) break;
+
+        char* cmd_start = cursor;
+        int paren_depth = 0;
+
+        while (*cursor) {
+            if (*cursor == '(') paren_depth++;
+            else if (*cursor == ')') paren_depth--;
+            else if (*cursor == ',' && paren_depth == 0) break;
+            cursor++;
+        }
+
+        if (tl.count >= capacity) {
+            capacity *= 2;
+            tl.commands = realloc(tl.commands, sizeof(char*) * capacity);
+        }
+
+        char saved = *cursor;
+        *cursor = '\0'; // Terminate the command
+        
+        // Only add if not empty
+        char* cmd = cmd_start;
+        trim(cmd);
+        if (*cmd) {
+            tl.commands[tl.count++] = cmd;
+        }
+
+        if (saved == ',') cursor++;
+    }
+    return tl;
+}
+
+void free_tokenized_loop(TokenizedLoop tl) {
+    free(tl.commands);
+    free(tl.buffer);
+}
+
 void handle_for_command(char* input_line) {
     uint64_t process_command(char* input_line);
-    char* p = skip_ws(input_line + 4); // skip "/for"
-    if (!*p) return;
-
-    // 1. Parse loop count
-    char* endptr = NULL;
+    char* p = skip_ws(input_line + 4);
+    char* endptr;
     long count = strtol(p, &endptr, 0);
     if (count <= 0) return;
 
     p = skip_ws(endptr);
-    if (*p != '{') { printf("Expected '{' after count\n"); return; }
-    p++; // skip '{'
+    if (*p != '{') return;
+    char* brace_end = strchr(++p, '}');
+    if (!brace_end) return;
 
-    // Locate the closing brace
-    char* brace_end = strchr(p, '}');
-    if (!brace_end) { printf("Expected '}'\n"); return; }
-
+    TokenizedLoop tl = tokenize_body(p, brace_end);
     in_a_loop = true;
+    Variable* i_var = find_var("i");
 
-    // Copy the content inside { ... }
-    int body_len = brace_end - p;
-    char* loop_body = malloc(body_len + 1);
-    memcpy(loop_body, p, body_len);
-    loop_body[body_len] = '\0';
-
-    // 2. Execute the loop
     for (long i = 0; i < count; i++) {
-        // We need a fresh copy each iteration since we modify it
-        char* body_copy = strdup(loop_body);
-        char* cursor = body_copy;
-        
-        // Parse comma-separated commands (respecting parentheses)
-        while (*cursor != '\0') {
-            // Skip leading whitespace
-            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') {
-                cursor++;
-            }
-            if (*cursor == '\0') break;
-
-            // Find the start of this command
-            char* cmd_start = cursor;
-            
-            // Find next comma that's not inside parentheses
-            int paren_depth = 0;
-            while (*cursor != '\0') {
-                if (*cursor == '(') {
-                    paren_depth++;
-                } else if (*cursor == ')') {
-                    paren_depth--;
-                } else if (*cursor == ',' && paren_depth == 0) {
-                    break;
-                }
-                cursor++;
-            }
-
-            // Extract and process this command
-            char saved = *cursor;
-            *cursor = '\0';
-            
-            char* cmd = cmd_start;
-            trim(cmd);
-            
-            if (strlen(cmd) > 0) {
-                process_command(cmd);
-            }
-
-            // Move past the comma if we found one
-            if (saved == ',') {
-                *cursor = saved;
-                cursor++;
-            }
+        if (i_var) {
+            i_var->value = i;
+            i_var->is_set = true;
         }
         
-        free(body_copy);
+        for (int j = 0; j < tl.count; j++) {
+            process_command(tl.commands[j]);
+        }
+        
+        if (!in_a_loop) break;
     }
 
-    free(loop_body);
+    free_tokenized_loop(tl);
     in_a_loop = false;
 }
 
 void handle_repeat_until_command(char* input_line) {
     uint64_t process_command(char* input_line);
     char* p = skip_ws(input_line + 13); // skip "/repeat-until"
-    if (!*p) return;
+    if (*p != '{') { 
+        printf("Expected '{' after /repeat-until\n"); 
+        return; 
+    }
+    
+    char* brace_end = strchr(++p, '}');
+    if (!brace_end) { 
+        printf("Expected '}'\n"); 
+        return; 
+    }
 
-    if (*p != '{') { printf("Expected '{' after /repeat-until\n"); return; }
-    p++; // skip '{'
-
-    // Locate the closing brace
-    char* brace_end = strchr(p, '}');
-    if (!brace_end) { printf("Expected '}'\n"); return; }
-
+    // Pre-parse the body into individual commands
+    TokenizedLoop tl = tokenize_body(p, brace_end);
     in_a_loop = true;
 
-    // Copy the content inside { ... }
-    int body_len = brace_end - p;
-    char* loop_body = malloc(body_len + 1);
-    memcpy(loop_body, p, body_len);
-    loop_body[body_len] = '\0';
+    uint64_t i = 0;
+    Variable* i_var = find_var("i");
 
-    // 2. Execute the loop until assert fails
-    while (true) {
-        // We need a fresh copy each iteration since we modify it
-        char* body_copy = strdup(loop_body);
-        char* cursor = body_copy;
-        
-        // Parse comma-separated commands (respecting parentheses)
-        while (*cursor != '\0') {
-            // Skip leading whitespace
-            while (*cursor == ' ' || *cursor == '\t' || *cursor == '\n' || *cursor == '\r') {
-                cursor++;
-            }
-            if (*cursor == '\0') break;
+    while (in_a_loop) {
+        if (i_var) {
+            i_var->value = i++;
+            i_var->is_set = true;
+        }
 
-            // Find the start of this command
-            char* cmd_start = cursor;
+        // Execute each pre-tokenized command
+        for (int j = 0; j < tl.count; j++) {
+            process_command(tl.commands[j]);
             
-            // Find next comma that's not inside parentheses
-            int paren_depth = 0;
-            while (*cursor != '\0') {
-                if (*cursor == '(') {
-                    paren_depth++;
-                } else if (*cursor == ')') {
-                    paren_depth--;
-                } else if (*cursor == ',' && paren_depth == 0) {
-                    break;
-                }
-                cursor++;
-            }
-
-            // Extract and process this command
-            char saved = *cursor;
-            *cursor = '\0';
-            
-            char* cmd = cmd_start;
-            trim(cmd);
-            
-            if (strlen(cmd) > 0) {
-                process_command(cmd);
-                
-                if (assert_failed) {
-                    assert_failed = false;
-                    in_a_loop = false;
-                    free(body_copy);
-                    free(loop_body);
-                    return;
-                }
-            }
-
-            // Move past the comma if we found one
-            if (saved == ',') {
-                *cursor = saved;
-                cursor++;
+            // Check exit condition (assert failure)
+            if (assert_failed) {
+                assert_failed = false;
+                goto cleanup; // Exit both loops immediately
             }
         }
-        
-        free(body_copy);
     }
+
+cleanup:
+    free_tokenized_loop(tl);
     in_a_loop = false;
 }
 
@@ -1569,6 +1544,7 @@ trigger_function:
 int main(int argc, char** argv) {
     bool help = false;
     const char* script_file = NULL;
+    set_var("i", 0);
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -1690,6 +1666,7 @@ int main(int argc, char** argv) {
                 "    $<name> = <command>         Capture command/function output into variable\n"
                 "    &$<name>                    Address-of: Get the memory pointer to a variable's storage\n"
                 "    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>\n"
+                "    $i is a reserved variable for loop iterations. It is intentionally not reset on break\n"
                 "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", i32 $var1)\n"
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"

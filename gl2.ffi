@@ -100,7 +100,6 @@ $glGetProgramInfoLog = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --a
 ;         0.5f, -0.5f,
 ;         0.0f,  0.5f
 ;    };
-; for loops with $i coming soonTM
 $vertices = /alloc 24
 /set $vertices f32 -0.5
 /set $vertices + 4 f32 -0.5
