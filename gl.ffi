@@ -1,0 +1,21 @@
+; gl.ffi
+/loaddll opengl32.dll
+
+glfw3.dll void glfwInit()
+$w = glfw3.dll voidptr glfwCreateWindow(i32 640, i32 480, str "Triangle", voidptr 0, voidtpr 0) --print-result --assert=nonzero
+glfw3.dll void glfwMakeContextCurrent(voidptr $w)
+
+/repeat-until { glfw3.dll i32 glfwWindowShouldClose(voidptr $w) --assert=zero, ^
+ void glClear(u32 0x4000), ^
+ void glColor3f(f32 1.0f, f32 0.0f, f32 0.0f), ^
+ void glBegin(u32 0x4), ^
+  void glVertex2f(f32 -0.5f, f32 -0.5f), ^
+  void glVertex2f(f32 0.5f, f32 -0.5f), ^
+  void glVertex2f(f32 0.0f, f32 0.5f), ^
+ void glEnd(), ^
+ void glFlush(), ^
+ glfw3.dll void glfwSwapBuffers(voidptr $w), ^
+ glfw3.dll void glfwPollEvents() }
+
+msvcrt.dll i32 printf(str "goodbye!\n")
+/quit

@@ -1399,12 +1399,42 @@ int match_cmd(const char* input, const char* cmd, int allow_args) {
     else return next == '\0';
 }
 
+char* read_quoted_string(char** cursor) {
+    char* p = *cursor;
+    p = skip_ws(p);
+    if (*p != '"') return NULL;
+    
+    char* start = p;
+    p++; // skip initial quote
+    while (*p && (*p != '"' || *(p-1) == '\\')) { // Handle escaped quotes \"
+        p++;
+    }
+    if (*p == '"') p++; // skip closing quote
+    
+    size_t len = p - start;
+    char* res = malloc(len + 1);
+    memcpy(res, start, len);
+    res[len] = '\0';
+    
+    *cursor = p; // advance the main pointer past the string
+    return res;
+}
+
 uint64_t process_command(char* input_line) {
     char* p = skip_ws(input_line);
     if (!*p) return 0;
 
-    char* comment_ptr = strchr(p, ';');
-    if (comment_ptr) *comment_ptr = '\0';
+    bool in_quote = false;
+    for (char* c = p; *c; c++) {
+        if (*c == '"') {
+            in_quote = !in_quote;
+        }
+        if (*c == ';' && !in_quote) {
+            *c = '\0';
+            break;
+        }
+    }
+    if (!*p) return 0;
 
     // 1. Handle Variable Assignment ($a = ...)
     if (*p == '$') {
@@ -1453,40 +1483,43 @@ uint64_t process_command(char* input_line) {
     if (first_token) {
         TypeKind t = parse_type(first_token);
         
-        // Only enter if there is a value AND it's not a function call
         if (t != TYPE_VOID) { 
-            // We need to peek ahead. If the next token contains '(' or 
-            // is followed by '(', it is a function call, NOT a literal value.
-            char* val_str = read_token(&temp_p);
+            char* val_ptr = skip_ws(temp_p);
             
-            bool looks_like_func = false;
-            
-            if (val_str) {
-                // Case 1: "printf(" (token contains parenthesis)
-                if (strchr(val_str, '(')) {
-                    looks_like_func = true;
-                } 
-                // Case 2: "printf (" (next char is parenthesis)
-                else {
-                   char* next = skip_ws(temp_p);
-                   if (*next == '(') {
-                       looks_like_func = true;
-                   }
-                }
+            // 1. STRINGS: If it starts with ", it's a string literal.
+            if (*val_ptr == '"') {
+                char* val_str = read_quoted_string(&temp_p); 
+                uint64_t result = parse_argument_value(t, val_str);
+                free(val_str); free(first_token);
+                return result;
+            }
 
-                if (!looks_like_func) {
-                    uint64_t result = parse_argument_value(t, val_str);
+            // 2. FUNCTION CALLS (Standard or Variable-based)
+            // Peek at the next token to see if it's followed by '('
+            char* peek_p = temp_p;
+            char* val_str = read_token(&peek_p);
+            if (val_str) {
+                char* next_char = skip_ws(peek_p);
+                // If it's "Type $var(" or "Type func("
+                if (*next_char == '(' || strchr(val_str, '(')) {
                     free(val_str);
                     free(first_token);
-                    return result; 
+                    goto trigger_function; 
                 }
+                
+                // 3. LITERAL VALUES: (e.g., i32 42 or voidptr $some_var)
+                // Note: If there's no '(', it's just a value.
+                uint64_t result = parse_argument_value(t, val_str);
                 free(val_str);
+                free(first_token);
+                return result;
             }
         }
         free(first_token);
     }
-    
-    // Default: treat as function call
+
+trigger_function:
+    //printf("Calling function: %s\n", input_line);
     return handle_function_call(input_line);
 }
 
@@ -1549,6 +1582,7 @@ int main(int argc, char** argv) {
             fclose(f);
             return 1;
         }
+        memset(content, 0, fsize);
         fread(content, 1, fsize, f);
         content[fsize] = 0; // Null-terminate
         fclose(f);

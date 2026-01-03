@@ -5,3 +5,4 @@
 *.exp
 *.lib
 *.dll
+!glfw3.dll
