@@ -8,7 +8,7 @@ scary shit
 ## warning
 
 This tool is unsafe by design.  
-Lying about signatures will most likely crash the process or in semi-rare cases corrupt the stack.
+Lying about signatures may corrupt the stack.
 
 ## how 2 use it
 
@@ -195,6 +195,38 @@ wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > kernel32.dll void #1481(i32 5000)
 > kernel32.dll void #117(i32 750, i32 300)
+> /quit
+```
+
+</details>
+
+<details>
+<summary><b>SEH covering up my ass</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
+Enter command or /quit to exit.
+> test.dll void AccessViolation()
+
+[!!!] CRASH DETECTED DURING CALL [!!!]
+Exception Code: 0xC0000005
+Reason: Access Violation
+> test.dll void StackOverflow()
+
+[!!!] CRASH DETECTED DURING CALL [!!!]
+Exception Code: 0xC00000FD
+Reason: Stack Overflow
+> test.dll void IllegalInstruction()
+
+[!!!] CRASH DETECTED DURING CALL [!!!]
+Exception Code: 0xC000001D
+Reason: Illegal Instruction
+> test.dll void PrivInstruction()
+
+[!!!] CRASH DETECTED DURING CALL [!!!]
+Exception Code: 0xC0000096
+Reason: Privileged Instruction
 > /quit
 ```
 
@@ -662,9 +694,6 @@ Q: Can I use this in production?
 A: No warranty.
 
 Q: It crashed!  
-A: Liar liar pants on fire.
-
-Q: No i did not!  
 A: Open an issue. **Describe it well.**
 
 Q: Does it support all calling conventions?  

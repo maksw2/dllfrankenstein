@@ -820,25 +820,25 @@ void handle_hex_command(char* p) {
 
     unsigned char* data = (unsigned char*)addr;
     
-    printf("Dump of 0x%llX (%d bytes):\n", (uint64_t)data, count);
+    fprintf(stderr, "Dump of 0x%llX (%d bytes):\n", (uint64_t)data, count);
     for (int i = 0; i < count; i += 16) {
-        printf("  %llX: ", (uint64_t)(data + i));
+        fprintf(stderr, "  %llX: ", (uint64_t)(data + i));
         
         for (int j = 0; j < 16; j++) {
             if (i + j < count)
-                printf("%02X ", data[i + j]);
+                fprintf(stderr, "%02X ", data[i + j]);
             else
-                printf("   ");
+                fprintf(stderr, "   ");
         }
         
-        printf(" |");
+        fprintf(stderr, " |");
         for (int j = 0; j < 16; j++) {
             if (i + j < count) {
                 unsigned char c = data[i + j];
-                printf("%c", (c >= 32 && c <= 126) ? c : '.');
+                fprintf(stderr, "%c", (c >= 32 && c <= 126) ? c : '.');
             }
         }
-        printf("|\n");
+        fprintf(stderr, "|\n");
     }
 
     free(addr_str); 
@@ -1196,7 +1196,39 @@ uint64_t handle_function_call(char* input_line) {
     }
 
     //printf("DEBUG: Jumping to %p with %d args\n", func_ptr, spec.arg_count);
-    uint64_t result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
+    uint64_t result = 0;
+    bool crash_detected = false;
+    unsigned long exception_code_ = 0;
+
+    __try {
+        result = call_dynamic_function(func_ptr, args, spec.arg_count, float_mask);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        exception_code_ = GetExceptionCode();
+        crash_detected = true;
+    }
+
+    if (crash_detected) {
+        printf("\n[!!!] CRASH DETECTED DURING CALL [!!!]\n");
+        printf("Exception Code: 0x%08lX\n", exception_code_);
+        
+        switch(exception_code_) {
+            case EXCEPTION_ACCESS_VIOLATION:    printf("Reason: Access Violation\n"); break;
+            case EXCEPTION_STACK_OVERFLOW:      printf("Reason: Stack Overflow\n"); break;
+            case EXCEPTION_ILLEGAL_INSTRUCTION: printf("Reason: Illegal Instruction\n"); break;
+            case EXCEPTION_PRIV_INSTRUCTION:    printf("Reason: Privileged Instruction\n"); break;
+        }
+
+        // Emergency Cleanup
+        for (int j = 0; j < spec.arg_count; j++) {
+            if (spec.args[j].type == TYPE_STR) free((void*)spec.args[j].value);
+        }
+        free(expanded);
+        
+        // In script mode, a crash is fatal. In interactive, we let the user decide.
+        if (!interactive) exit(1);
+        return 0;
+    }
     
     // 7. POST-CALL: Formatting & Assertions
     if (spec.print_result && spec.return_type != TYPE_VOID) {

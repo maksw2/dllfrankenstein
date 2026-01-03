@@ -18,6 +18,22 @@ extern __declspec(dllexport) float Addf(float a, float b) {
     return a + b;
 }
 
+extern __declspec(dllexport) void AccessViolation() {
+    *(int*)0 = 0;
+}
+
+extern __declspec(dllexport) void StackOverflow() {
+    StackOverflow();
+}
+
+extern __declspec(dllexport) void IllegalInstruction() {
+    __ud2();
+}
+
+extern __declspec(dllexport) void PrivInstruction() {
+    __halt();
+}
+
 extern __declspec(dllexport) const char* sprint(const char* format, ...) {
     va_list args;
     va_start(args, format);
