@@ -46,8 +46,8 @@ Additional usage in interactive/script mode:
     /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
     /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign them
     /dlls                               List loaded DLLs
-    /for     <count>    {<cmd>}...      Repeat {commands} <count> times
-    /repeat-until       {<cmd>}...      Repeat {commands} until assert
+    /for     <count>    {<cmd>, ...}    Repeat {} <count> times
+    /repeat-until       {<cmd>, ...}    Repeat {} until assert
     /quit                               Exit the program
 Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     --normal-variables-pretty-please allows reassignment. Not recommended.

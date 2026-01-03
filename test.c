@@ -119,3 +119,27 @@ extern __declspec(dllexport) LRESULT CALLBACK WindowProcessW(HWND hWnd, UINT msg
     // Let Windows handle any messages we don't care about
     return DefWindowProcW(hWnd, msg, wp, lp);
 }
+
+extern __declspec(dllexport) LRESULT CALLBACK GenericWindowProcA(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_DESTROY:
+            // Post a quit message to the message queue
+            PostQuitMessage(0);
+            return 0;
+    }
+
+    // Let Windows handle any messages we don't care about
+    return DefWindowProcA(hWnd, msg, wp, lp);
+}
+
+extern __declspec(dllexport) LRESULT CALLBACK GenericWindowProcW(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_DESTROY:
+            // Post a quit message to the message queue
+            PostQuitMessage(0);
+            return 0;
+    }
+
+    // Let Windows handle any messages we don't care about
+    return DefWindowProcW(hWnd, msg, wp, lp);
+}

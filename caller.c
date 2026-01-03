@@ -70,6 +70,18 @@ int g_var_count = 0;
 
 bool interactive = false;
 bool normal_vars = false;
+bool quiet = true;
+bool assert_failed = false;
+bool in_a_loop = false;
+
+void print(const char* format, ...) {
+    if (quiet) {
+        va_list args;
+        va_start(args, format);
+        vprintf(format, args);
+        va_end(args);
+    }
+}
 
 // Find a variable by name, returns NULL if not found
 Variable* find_var(const char* name) {
@@ -609,8 +621,8 @@ void calculate_struct_layout(Struct *s) {
 }
 
 void print_struct(Struct *s) {
-    printf("Offset | Size | Align | Type    | Name\n");
-    printf("------ | ---- | ----- | ------- | --------------------\n");
+    print("Offset | Size | Align | Type    | Name\n");
+    print("------ | ---- | ----- | ------- | --------------------\n");
     
     int last_end = 0;
     for (int i = 0; i < s->member_count; i++) {
@@ -619,7 +631,7 @@ void print_struct(Struct *s) {
         // Print padding if any
         if (m->offset > last_end) {
             int padding = m->offset - last_end;
-            printf("0x%04X | (%d bytes padding)\n", last_end, padding);
+            print("0x%04X | (%d bytes padding)\n", last_end, padding);
         }
         
         char type_str[64];
@@ -628,10 +640,10 @@ void print_struct(Struct *s) {
         if (m->array_size > 0) {
             char array_str[80];
             snprintf(array_str, sizeof(array_str), "%s[%d]", type_str, m->array_size);
-            printf("0x%04X | %-4d | %-5d | %-7s | %s\n", 
+            print("0x%04X | %-4d | %-5d | %-7s | %s\n", 
                    m->offset, m->size, m->alignment, array_str, m->name);
         } else {
-            printf("0x%04X | %-4d | %-5d | %-7s | %s\n", 
+            print("0x%04X | %-4d | %-5d | %-7s | %s\n", 
                    m->offset, m->size, m->alignment, type_str, m->name);
         }
         
@@ -641,11 +653,11 @@ void print_struct(Struct *s) {
     // Print trailing padding
     if (s->total_size > last_end) {
         int padding = s->total_size - last_end;
-        printf("0x%04X | (%d bytes trailing padding)\n", last_end, padding);
+        print("0x%04X | (%d bytes trailing padding)\n", last_end, padding);
     }
     
-    printf("Total size: %d bytes (0x%X)\n", s->total_size, s->total_size);
-    printf("Alignment: %d bytes\n", s->alignment);
+    print("Total size: %d bytes (0x%X)\n", s->total_size, s->total_size);
+    print("Alignment: %d bytes\n", s->alignment);
 }
 
 void handle_quit_command() {
@@ -658,7 +670,7 @@ uint64_t handle_alloc_command(char* p) {
     char* expanded = expand_vars(p);
     size_t size = strtoull(expanded, NULL, 0);
     void* ptr = malloc(size);
-    printf("0x%llX\n", (uint64_t)ptr);
+    print("0x%llX\n", (uint64_t)ptr);
     free(expanded);
     return (uint64_t)ptr; // Return the address
 }
@@ -668,7 +680,7 @@ void handle_free_command(char* p) {
     char* expanded = expand_vars(p);
     void* ptr = (void*)strtoull(expanded, NULL, 16);
     free(ptr);
-    printf("Freed memory at 0x%llX\n", (uint64_t)ptr);
+    print("Freed memory at 0x%llX\n", (uint64_t)ptr);
     free(expanded);
 }
 
@@ -714,7 +726,7 @@ void handle_set_command(char* p) {
     
     char res_buf[256];
     format_result(value, type, res_buf, sizeof(res_buf));
-    printf("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
+    print("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
     
     free(addr_str); free(type_str); free(val_str);
     free(expanded);
@@ -750,7 +762,7 @@ void handle_memset_command(char* p) {
 
     if (addr != 0) {
         memset((void*)addr, value, count);
-        printf("Set %zu bytes at 0x%llX to 0x%02x\n", count, addr, value);
+        print("Set %zu bytes at 0x%llX to 0x%02x\n", count, addr, value);
     } else {
         printf("Error: Invalid address for memset\n");
     }
@@ -796,7 +808,7 @@ uint64_t handle_get_command(char* p) {
     
     char res_buf[256];
     format_result(value, type, res_buf, sizeof(res_buf));
-    printf("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
+    print("Value at 0x%llX (%s): %s\n", addr, type_str, res_buf);
     
     free(addr_str); free(type_str); free(expanded);
     return value;
@@ -868,7 +880,7 @@ uint64_t handle_address_command(char* p) {
                     g_registry[g_registry_count].handle = h;
                     g_focus_idx = g_registry_count; // Set focus to this DLL
                     g_registry_count++;
-                    printf("[Auto-Registered: %s]\n", dll_path);
+                    print("[Auto-Registered: %s]\n", dll_path);
                 } else {
                     printf("Error: Registry full, cannot pin DLL.\n");
                     if (!interactive)
@@ -884,7 +896,7 @@ uint64_t handle_address_command(char* p) {
         if (h) {
             result_addr = (uint64_t)GetProcAddress(h, name_str);
             if (result_addr) {
-                printf("0x%llX\n", result_addr);
+                print("0x%llX\n", result_addr);
             } else {
                 printf("Error: Symbol '%s' not found in %s\n", name_str, dll_path);
                 if (!interactive)
@@ -981,7 +993,7 @@ size_t handle_struct_command(char* p) {
 
                 if (var_name) {
                     if (set_var(var_name, offset)) {
-                        printf("$%s = 0x%X\n", var_name, offset);
+                        print("$%s = 0x%X\n", var_name, offset);
                     }
                     free(var_name);
                 }
@@ -1011,7 +1023,7 @@ void handle_loaddll_command(char* p) {
     char* expanded = expand_vars(p);
 
     if (find_registered_dll(expanded, &g_focus_idx)) {
-        printf("DLL '%s' is already loaded (Focus set).\n", expanded);
+        print("DLL '%s' is already loaded (Focus set).\n", expanded);
     } else if (g_registry_count < 32) {
         HMODULE h = LoadLibraryA(expanded);
         if (h) {
@@ -1019,7 +1031,7 @@ void handle_loaddll_command(char* p) {
             g_registry[g_registry_count].handle = h;
             g_focus_idx = g_registry_count;
             g_registry_count++;
-            printf("Loaded and registered: %s (Focus set)\n", expanded);
+            print("Loaded and registered: %s (Focus set)\n", expanded);
         } else {
             printf("Error: Could not load '%s' (Error: %lu)\n", expanded, GetLastError());
             if (!interactive)
@@ -1040,7 +1052,7 @@ void handle_freedll_command(char* p) {
         for (int i = idx; i < g_registry_count - 1; i++) g_registry[i] = g_registry[i+1];
         g_registry_count--;
         g_focus_idx = (g_registry_count > 0) ? 0 : -1;
-        printf("Unloaded: %s\n", expanded);
+        print("Unloaded: %s\n", expanded);
     } else {
         printf("DLL '%s' not found in registry.\n", expanded);
     }
@@ -1049,28 +1061,26 @@ void handle_freedll_command(char* p) {
 }
 
 void handle_dlls_command() {
-    printf("Registered DLLs (%d/%d)\n", g_registry_count, 32);
+    print("Registered DLLs (%d/%d)\n", g_registry_count, 32);
     
     if (g_registry_count == 0) {
-        printf("No DLLs loaded.\n");
+        print("No DLLs loaded.\n");
         return;
     }
 
-    printf("%-3s %-10s %s\n", "ID", "Handle", "Path");
+    print("%-3s %-10s %s\n", "ID", "Handle", "Path");
 
     for (int i = 0; i < g_registry_count; i++) {
         // Use an asterisk or arrow to indicate the focused DLL
         char focus_char = (i == g_focus_idx) ? '>' : ' ';
         
-        printf("%c%02d [0x%p] %s\n", 
+        print("%c%02d [0x%p] %s\n", 
                focus_char, 
                i, 
                g_registry[i].handle, 
                g_registry[i].path);
     }
 }
-
-bool assert_failed = false;
 
 uint64_t handle_function_call(char* input_line) {
     char* p = input_line;
@@ -1195,7 +1205,7 @@ uint64_t handle_function_call(char* input_line) {
         float_mask |= 0x80000000; // Set the 31st bit
     }
 
-    //printf("DEBUG: Jumping to %p with %d args\n", func_ptr, spec.arg_count);
+    //print("DEBUG: Jumping to %p with %d args\n", func_ptr, spec.arg_count);
     uint64_t result = 0;
     bool crash_detected = false;
     unsigned long exception_code_ = 0;
@@ -1234,7 +1244,7 @@ uint64_t handle_function_call(char* input_line) {
     if (spec.print_result && spec.return_type != TYPE_VOID) {
         char buf[256];
         format_result(result, spec.return_type, buf, sizeof(buf));
-        printf("Result: %s\n", buf);
+        print("Result: %s\n", buf);
     }
     
     assert_failed = false;
@@ -1246,7 +1256,7 @@ uint64_t handle_function_call(char* input_line) {
             case ASSERT_NON_NEGATIVE: if ((int64_t)result < 0) assert_failed = true; break;
             default: break;
         }
-        if (assert_failed) {
+        if (assert_failed && !in_a_loop) {
             char buf[256];
             format_result(result, spec.return_type, buf, sizeof(buf));
             printf("Assertion failed for result: %s\n", buf);
@@ -1279,6 +1289,8 @@ void handle_for_command(char* input_line) {
     // Locate the closing brace
     char* brace_end = strchr(p, '}');
     if (!brace_end) { printf("Expected '}'\n"); return; }
+
+    in_a_loop = true;
 
     // Copy the content inside { ... }
     int body_len = brace_end - p;
@@ -1338,6 +1350,7 @@ void handle_for_command(char* input_line) {
     }
 
     free(loop_body);
+    in_a_loop = false;
 }
 
 void handle_repeat_until_command(char* input_line) {
@@ -1351,6 +1364,8 @@ void handle_repeat_until_command(char* input_line) {
     // Locate the closing brace
     char* brace_end = strchr(p, '}');
     if (!brace_end) { printf("Expected '}'\n"); return; }
+
+    in_a_loop = true;
 
     // Copy the content inside { ... }
     int body_len = brace_end - p;
@@ -1400,6 +1415,7 @@ void handle_repeat_until_command(char* input_line) {
                 
                 if (assert_failed) {
                     assert_failed = false;
+                    in_a_loop = false;
                     free(body_copy);
                     free(loop_body);
                     return;
@@ -1415,6 +1431,7 @@ void handle_repeat_until_command(char* input_line) {
         
         free(body_copy);
     }
+    in_a_loop = false;
 }
 
 int match_cmd(const char* input, const char* cmd, int allow_args) {
@@ -1478,7 +1495,7 @@ uint64_t process_command(char* input_line) {
             uint64_t result = process_command(skip_ws(eq_ptr + 1));
 
             if (set_var(var_name, result)) {
-                printf("$%s = 0x%llX\n", var_name, result);
+                print("$%s = 0x%llX\n", var_name, result);
             }
             return result;
         }
@@ -1545,7 +1562,7 @@ uint64_t process_command(char* input_line) {
     }
 
 trigger_function:
-    //printf("Calling function: %s\n", input_line);
+    //print("Calling function: %s\n", input_line);
     return handle_function_call(input_line);
 }
 
@@ -1575,6 +1592,8 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "Error: --script requires a file path.\n");
                 return 1;
             }
+        } else if (strcmp(argv[i], "--quiet") == 0) {
+            quiet = false;
         }
     }
 
@@ -1589,7 +1608,7 @@ int main(int argc, char** argv) {
             process_command(line);
         }
     } else if (script_file) {
-        printf("wilczurski's cool shit - script\n");
+        print("wilczurski's cool shit - script\n");
         FILE* f = fopen(script_file, "r");
         if (!f) {
             fprintf(stderr, "Failed to open script file: %s\n", script_file);
@@ -1629,7 +1648,7 @@ int main(int argc, char** argv) {
         char *line = strtok(content, "\n");
         while (line != NULL) {
             // line is already null-terminated at the newline by strtok
-            printf("> %s\n", line);
+            print("> %s\n", line);
             process_command(line);
             line = strtok(NULL, "\n");
             if (assert_failed)
@@ -1662,8 +1681,8 @@ int main(int argc, char** argv) {
                 "    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct\n"
                 "    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign them\n"
                 "    /dlls                               List loaded DLLs\n"
-                "    /for     <count>    {<cmd>}...      Repeat {commands} <count> times\n"
-                "    /repeat-until       {<cmd>}...      Repeat {commands} until assert\n"
+                "    /for     <count>    {<cmd>, ...}    Repeat {} <count> times\n"
+                "    /repeat-until       {<cmd>, ...}    Repeat {} until assert\n"
                 "    /quit                               Exit the program\n"
                 "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
                 "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
@@ -1681,7 +1700,7 @@ int main(int argc, char** argv) {
             );
             return 1;
         }
-        printf("wilczurski's cool shit - one-shot\n");
+        print("wilczurski's cool shit - one-shot\n");
 
         // Reconstruct the command line excluding the program name for the parser
         char* p = GetCommandLineA();
