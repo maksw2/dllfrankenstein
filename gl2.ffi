@@ -112,13 +112,11 @@ $vertices = /alloc 24
 ;    unsigned int VBO, VAO;
 ;    glGenVertexArrays(1, &VAO);
 ;    glGenBuffers(1, &VBO);
-; workaround for getting a pointer to a variable
-$VAO_ptr = /alloc 4
-$VBO_ptr = /alloc 4
-void $glGenVertexArrays(i32 1, voidptr $VAO_ptr)
-void $glGenBuffers(i32 1, voidptr $VBO_ptr)
-$VAO = /get $VAO_ptr u32
-$VBO = /get $VBO_ptr u32
+$VAO = u32 0
+$VBO = u32 0
+void $glGenVertexArrays(i32 1, voidptr &$VAO)
+void $glGenBuffers(i32 1, voidptr &$VBO)
+
 
 ;    glBindVertexArray(VAO);
 ;    glBindBuffer(GL_ARRAY_BUFFER, VBO);
@@ -136,20 +134,14 @@ void $glEnableVertexAttribArray(u32 0)
 ;    glShaderSource(vertexShader, 1, &vertex_shader_src, 0);
 ;    glCompileShader(vertexShader);
 $vertexShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
-; workaround for getting a pointer to a variable
-$vertexShader_ptr = /alloc 8
-/set $vertexShader_ptr voidptr $vertex_shader_src
-void $glShaderSource(u32 $vertexShader, i32 1, voidptr $vertexShader_ptr, voidptr 0)
+void $glShaderSource(u32 $vertexShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
 void $glCompileShader(u32 $vertexShader)
 
 ;    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
 ;    glShaderSource(fragmentShader, 1, &fragment_shader_src, 0);
 ;    glCompileShader(fragmentShader);
 $fragmentShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
-; workaround for getting a pointer to a variable
-$fragmentShader_ptr = /alloc 8
-/set $fragmentShader_ptr voidptr $fragment_shader_src
-void $glShaderSource(u32 $fragmentShader, i32 1, voidptr $fragmentShader_ptr, voidptr 0)
+void $glShaderSource(u32 $fragmentShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
 void $glCompileShader(u32 $fragmentShader)
 
 ;    unsigned int shaderProgram = glCreateProgram();
@@ -184,9 +176,5 @@ void $glDeleteShader(u32 $fragmentShader)
 
 ; cleanup
 /free $vertices
-/free $VAO_ptr
-/free $VBO_ptr
-/free $vertexShader_ptr
-/free $fragmentShader_ptr
 
 /quit

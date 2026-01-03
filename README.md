@@ -51,8 +51,10 @@ Additional usage in interactive/script mode:
     /quit                               Exit the program
 Variables by default are Write-Once Read-Many, no shadowing, no scopes.
     --normal-variables-pretty-please allows reassignment. Not recommended.
-    $<name> = <type> <value>            Assign a variable
-    $<name> = rhs                       Function call or valid return command
+    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)
+    $<name> = <command>         Capture command/function output into variable
+    &$<name>                    Address-of: Get the memory pointer to a variable's storage
+    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
     Variables can be used as function arguments, like test.dll void print(str "%d", i32 $var1)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
@@ -70,6 +72,130 @@ You can pass hex and decimal values; strtoll or strtoull will evaluate them depe
 ```
 caller.exe user32.dll i32 MessageBoxA(voidptr 0, str "hi", str "title", u32 0)
 caller.exe user32.dll i32 MessageBoxW(voidptr 0, wstr "hi", wstr "title", u32 0)
+```
+
+</details>
+
+<details>
+<summary><b>starting tf2</b></summary>
+
+because tf2 reads from GetCommandLineA and not from lpCmdLine we have to pass parameters
+ for LauncherMain in our parameters and a dummy string in LauncherMain.  
+idiots.
+
+```
+D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
+
+D:\SteamLibrary\steamapps\common\Team Fortress 2>caller --interactive -game tf
+wilczurski's cool shit - repl
+Enter command or /quit to exit.
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
+$hInstance = 0x7FF63DAD0000
+> launcher.dll i32 LauncherMain(voidptr $hInstance, voidptr 0, voidptr 0, i32 1)
+Setting breakpad minidump AppID = 440
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded no]
+Using breakpad crash handler
+Forcing breakpad minidump interfaces to load
+Looking up breakpad interfaces from steamclient
+Calling BreakpadMiniDumpSystemInit
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+Looking up breakpad interfaces from steamclient
+Calling BreakpadMiniDumpSystemInit
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
+SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
+Fontconfig error: Cannot load default config file: No such file: (null)
+Unable to remove d:\steamlibrary\steamapps\common\team fortress 2\tf\textwindow_temp.html!
+> /quit
+```
+
+</details>
+
+<details>
+<summary><b>having fun with memory</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
+Enter command or /quit to exit.
+> $a = /alloc 128
+0x159D3B19F40
+$a = 0x159D3B19F40
+> /set $a i32 67
+Value at 0x159D3B19F40 (i32): 67
+> /get $a i32
+Value at 0x159D3B19F40 (i32): 67
+> /set $a+4 i32 420
+Value at 0x159D3B19F44 (i32): 420
+> /hex $a 8
+Dump of 0x159D3B19F40 (8 bytes):
+  159D3B19F40: 43 00 00 00 A4 01 00 00                          |C.......|
+> /free $a
+Freed memory at 0x159D3B19F40
+> $b = /alloc 128
+0x159D3B19F20
+$b = 0x159D3B19F20
+> /set $b str "hello, world!"
+Value at 0x159D3B19F20 (str): hello, world!
+> /get $b str
+Value at 0x159D3B19F20 (str): hello, world!
+> /hex $b 128
+Dump of 0x159D3B19F20 (128 bytes):
+  159D3B19F20: 68 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00 00 00  |hello, world!...|
+  159D3B19F30: 00 00 00 00 00 00 00 00 09 00 01 08 55 99 00 10  |............U...|
+  159D3B19F40: 43 00 00 00 A4 01 00 00 50 01 B0 D3 59 01 00 00  |C.......P...Y...|
+  159D3B19F50: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+  159D3B19F60: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+  159D3B19F70: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+  159D3B19F80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+  159D3B19F90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+> /free $b
+Freed memory at 0x159D3B19F20
+> /quit
+```
+
+remember to /memset your memory kids!
+
+</details>
+
+<details>
+<summary><b>assertions</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
+Enter command or /quit to exit.
+> test.dll i32 Add(i32 0, i32 0) --print-result --assert=zero
+Result: 0
+> test.dll i32 Add(i32 9, i32 10) --print-result --assert=nonzero
+Result: 19
+> test.dll i32 Add(i32 0, i32 0) --print-result --assert=nonzero
+Result: 0
+Assertion failed for result: 0
+> test.dll i32 Add(i32 9, i32 10) --print-result --assert=zero
+Result: 19
+Assertion failed for result: 19
+> /quit
+```
+
+</details>
+
+<details>
+<summary><b>import by ordinal</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Sleep
+       1481  5C8 00031980 Sleep
+C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Beep
+        117   74 0004F780 Beep
+C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+wilczurski's cool shit - repl
+Enter command or /quit to exit.
+> kernel32.dll void #1481(i32 5000)
+> kernel32.dll void #117(i32 750, i32 300)
+> /quit
 ```
 
 </details>
@@ -287,7 +413,7 @@ Freed memory at 0x1F65AFE9A10
 </details>
 
 <details>
-<summary><b>a simple opengl 1.1 triangle</b></summary>
+<summary><b>running a script; a simple opengl 1.1 triangle</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl.ffi
@@ -310,7 +436,7 @@ goodbye!
 </details>
 
 <details>
-<summary><b>a complex opengl 3.3 triangle</b></summary>
+<summary><b>running a script; a complex opengl 3.3 triangle</b></summary>
 
 ```
 C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl2.ffi
@@ -354,9 +480,9 @@ $GL_FALSE = 0x0
 > ;    "   FragColor = vec4(1.0, 0.5, 0.2, 1.0);\n" // Orange color
 > ;    "}";
 > $vertex_shader_src = str "      #version 330 core\n      layout (location = 0) in vec2 aPos;\n      void main() {\n          gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);\n      }"
-$vertex_shader_src = 0x28A5C6E3400
+$vertex_shader_src = 0x298FC376C90
 > $fragment_shader_src = str "      #version 330 core\n      out vec4 FragColor;\n      void main() {\n         FragColor = vec4(1.0, 0.5, 0.2, 1.0);\n      }"
-$fragment_shader_src = 0x28A5C6E0150
+$fragment_shader_src = 0x298FC376D40
 > ;int32_t main(void) {
 > ;    glfwInit();
 > ;    w = glfwCreateWindow(640, 480, "Modern Triangle", 0, 0);
@@ -365,7 +491,7 @@ $fragment_shader_src = 0x28A5C6E0150
 Loaded and registered: glfw3.dll (Focus set)
 > i32 glfwInit()
 > $w = voidptr glfwCreateWindow(i32 640, i32 480, str "Modern Triangle", voidptr 0, voidptr 0) --assert=nonzero
-$w = 0x28A5C712E40
+$w = 0x298FC3AA240
 > void glfwMakeContextCurrent(voidptr $w)
 > ;void load_gl_functions() {
 > ;    glClear = (PFNGLCLEARPROC)glfwGetProcAddress("glClear");
@@ -435,38 +561,29 @@ $glGetProgramInfoLog = 0x7FFAFE1C6F20
 > ;    };
 > ; for loops with $i coming soonTM
 > $vertices = /alloc 24
-0x28A5F199E50
-$vertices = 0x28A5F199E50
+0x298FF06B3C0
+$vertices = 0x298FF06B3C0
 > /set $vertices f32 -0.5
-Value at 0x28A5F199E50 (f32): -0.500000
+Value at 0x298FF06B3C0 (f32): -0.500000
 > /set $vertices + 4 f32 -0.5
-Value at 0x28A5F199E54 (f32): -0.500000
+Value at 0x298FF06B3C4 (f32): -0.500000
 > /set $vertices + 8 f32 0.5
-Value at 0x28A5F199E58 (f32): 0.500000
+Value at 0x298FF06B3C8 (f32): 0.500000
 > /set $vertices + 12 f32 -0.5
-Value at 0x28A5F199E5C (f32): -0.500000
+Value at 0x298FF06B3CC (f32): -0.500000
 > /set $vertices + 16 f32 0.0
-Value at 0x28A5F199E60 (f32): 0.000000
+Value at 0x298FF06B3D0 (f32): 0.000000
 > /set $vertices + 20 f32 0.5
-Value at 0x28A5F199E64 (f32): 0.500000
+Value at 0x298FF06B3D4 (f32): 0.500000
 > ;    unsigned int VBO, VAO;
 > ;    glGenVertexArrays(1, &VAO);
 > ;    glGenBuffers(1, &VBO);
-> ; workaround for getting a pointer to a variable
-> $VAO_ptr = /alloc 4
-0x28A5F47F870
-$VAO_ptr = 0x28A5F47F870
-> $VBO_ptr = /alloc 4
-0x28A5F47FA10
-$VBO_ptr = 0x28A5F47FA10
-> void $glGenVertexArrays(i32 1, voidptr $VAO_ptr)
-> void $glGenBuffers(i32 1, voidptr $VBO_ptr)
-> $VAO = /get $VAO_ptr u32
-Value at 0x28A5F47F870 (u32): 1
-$VAO = 0x1
-> $VBO = /get $VBO_ptr u32
-Value at 0x28A5F47FA10 (u32): 1
-$VBO = 0x1
+> $VAO = u32 0
+$VAO = 0x0
+> $VBO = u32 0
+$VBO = 0x0
+> void $glGenVertexArrays(i32 1, voidptr &$VAO)
+> void $glGenBuffers(i32 1, voidptr &$VBO)
 > ;    glBindVertexArray(VAO);
 > ;    glBindBuffer(GL_ARRAY_BUFFER, VBO);
 > ;    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -482,26 +599,14 @@ $VBO = 0x1
 > ;    glCompileShader(vertexShader);
 > $vertexShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
 $vertexShader = 0x1
-> ; workaround for getting a pointer to a variable
-> $vertexShader_ptr = /alloc 8
-0x28A5F47F830
-$vertexShader_ptr = 0x28A5F47F830
-> /set $vertexShader_ptr voidptr $vertex_shader_src
-Value at 0x28A5F47F830 (voidptr): 0x28A5C6E3400
-> void $glShaderSource(u32 $vertexShader, i32 1, voidptr $vertexShader_ptr, voidptr 0)
+> void $glShaderSource(u32 $vertexShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
 > void $glCompileShader(u32 $vertexShader)
 > ;    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
 > ;    glShaderSource(fragmentShader, 1, &fragment_shader_src, 0);
 > ;    glCompileShader(fragmentShader);
 > $fragmentShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
 $fragmentShader = 0x2
-> ; workaround for getting a pointer to a variable
-> $fragmentShader_ptr = /alloc 8
-0x28A5F47FA20
-$fragmentShader_ptr = 0x28A5F47FA20
-> /set $fragmentShader_ptr voidptr $fragment_shader_src
-Value at 0x28A5F47FA20 (voidptr): 0x28A5C6E0150
-> void $glShaderSource(u32 $fragmentShader, i32 1, voidptr $fragmentShader_ptr, voidptr 0)
+> void $glShaderSource(u32 $fragmentShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
 > void $glCompileShader(u32 $fragmentShader)
 > ;    unsigned int shaderProgram = glCreateProgram();
 > ;    glAttachShader(shaderProgram, vertexShader);
@@ -528,135 +633,7 @@ $prog = 0x3
 Assertion failed for result: 1
 > ; cleanup
 > /free $vertices
-Freed memory at 0x28A5F199E50
-> /free $VAO_ptr
-Freed memory at 0x28A5F47F870
-> /free $VBO_ptr
-Freed memory at 0x28A5F47FA10
-> /free $vertexShader_ptr
-Freed memory at 0x28A5F47F830
-> /free $fragmentShader_ptr
-Freed memory at 0x28A5F47FA20
-> /quit
-```
-
-</details>
-
-<details>
-<summary><b>starting tf2</b></summary>
-
-because tf2 reads from GetCommandLineA and not from lpCmdLine we have to pass parameters
- for LauncherMain in our parameters and a dummy string in LauncherMain.  
-idiots.
-
-```
-D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
-
-D:\SteamLibrary\steamapps\common\Team Fortress 2>caller --interactive -game tf
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
-$hInstance = 0x7FF63DAD0000
-> launcher.dll i32 LauncherMain(voidptr $hInstance, voidptr 0, voidptr 0, i32 1)
-Setting breakpad minidump AppID = 440
-SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded no]
-Using breakpad crash handler
-Forcing breakpad minidump interfaces to load
-Looking up breakpad interfaces from steamclient
-Calling BreakpadMiniDumpSystemInit
-SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
-SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
-Looking up breakpad interfaces from steamclient
-Calling BreakpadMiniDumpSystemInit
-SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
-SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
-SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561199513858240 [API loaded yes]
-SteamInternal_SetMinidumpSteamID:  Setting Steam ID:  76561199513858240
-Fontconfig error: Cannot load default config file: No such file: (null)
-Unable to remove d:\steamlibrary\steamapps\common\team fortress 2\tf\textwindow_temp.html!
-> /quit
-```
-
-</details>
-
-<details>
-<summary><b>having fun with memory</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> /alloc 128
-Allocated 128 bytes at 0x000002061136BF40
-> /set 0x2061136BF40 i32 67
-> /get 0x2061136BF40 i32
-Value at 000002061136BF40 (i32): 67
-> /free 0x2061136BF40
-Freed memory at 0x000002061136BF40
-> /quit
-
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> /alloc 128
-Allocated 128 bytes at 0x0000024F2C245990
-> /set 0x0000024F2C245990 str "hello, world!"
-> /get 0x0000024F2C245990 str
-Value at 0x0000024F2C245990 (str): hello, world!
-> /hex 0x0000024F2C245990 128
-Dump of 0x0000024F2C245990 (128 bytes):
-  0000024F2C245990: 68 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00 00 00  |hello, world!...|
-  0000024F2C2459A0: 6E 00 3B 00 43 00 3A 00 5C 00 55 00 73 00 65 00  |n.;.C.:.\.U.s.e.|
-  0000024F2C2459B0: 72 00 73 00 5C 00 41 00 64 00 6D 00 69 00 6E 00  |r.s.\.A.d.m.i.n.|
-  0000024F2C2459C0: 69 00 73 00 74 00 72 00 61 00 74 00 6F 00 72 00  |i.s.t.r.a.t.o.r.|
-  0000024F2C2459D0: 5C 00 41 00 70 00 70 00 44 00 61 00 74 00 61 00  |\.A.p.p.D.a.t.a.|
-  0000024F2C2459E0: 5C 00 4C 00 6F 00 63 00 61 00 6C 00 5C 00 50 00  |\.L.o.c.a.l.\.P.|
-  0000024F2C2459F0: 72 00 6F 00 67 00 72 00 61 00 6D 00 73 00 5C 00  |r.o.g.r.a.m.s.\.|
-  0000024F2C245A00: 4D 00 69 00 63 00 72 00 6F 00 73 00 6F 00 66 00  |M.i.c.r.o.s.o.f.|
-> /free 0x0000024F2C245990
-Freed memory at 0x0000024F2C245990
-> /quit
-```
-
-remember to /memset your memory kids!
-
-</details>
-
-<details>
-<summary><b>assertions</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> test.dll i32 Add(i32 0, i32 0) --print-result --assert=zero
-Result: 0
-> test.dll i32 Add(i32 9, i32 10) --print-result --assert=nonzero
-Result: 19
-> test.dll i32 Add(i32 0, i32 0) --print-result --assert=nonzero
-Result: 0
-Assertion failed for result: 0
-> test.dll i32 Add(i32 9, i32 10) --print-result --assert=zero
-Result: 19
-Assertion failed for result: 19
-> /quit
-```
-
-</details>
-
-<details>
-<summary><b>import by ordinal</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Sleep
-       1481  5C8 00031980 Sleep
-C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Beep
-        117   74 0004F780 Beep
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> kernel32.dll void #1481(i32 5000)
-> kernel32.dll void #117(i32 750, i32 300)
+Freed memory at 0x298FF06B3C0
 > /quit
 ```
 

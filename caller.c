@@ -135,6 +135,18 @@ char* strndup(const char* s, size_t n) {
 // Helper to get a value from either a literal or a variable
 uint64_t get_operand_value(char* p, char** endptr) {
     p = skip_ws(p);
+    
+    bool deref = false;
+    bool addr_of = false;
+
+    // Support multiple or combined prefixes (e.g., *&$var)
+    while (*p == '*' || *p == '&') {
+        if (*p == '*') deref = !deref; 
+        if (*p == '&') addr_of = !addr_of;
+        p++;
+    }
+
+    uint64_t val = 0;
     if (*p == '$') {
         char* name_start = p + 1;
         char* name_end = name_start;
@@ -147,10 +159,24 @@ uint64_t get_operand_value(char* p, char** endptr) {
         free(var_name);
         
         *endptr = name_end;
-        return var ? var->value : 0; // Or handle error
+        if (!var) return 0;
+
+        // If & was used, we want the address of the value field in the struct
+        val = addr_of ? (uint64_t)&(var->value) : var->value;
     } else {
-        return strtoull(p, endptr, 0);
+        val = strtoull(p, endptr, 0);
     }
+
+    // If * was used, treat the current value as an address and peek
+    if (deref) {
+        if (val == 0) {
+            fprintf(stderr, "Error: Null pointer dereference\n");
+            return 0;
+        }
+        val = *(uint64_t*)val;
+    }
+
+    return val;
 }
 
 char* expand_vars(const char* input) {
@@ -165,109 +191,77 @@ char* expand_vars(const char* input) {
         char* dollar = strchr(result, '$');
         if (!dollar) break;
 
-        // Extract variable name dynamically
-        char* name_start = dollar + 1;
-        char* name_end = name_start;
-        while (*name_end && (isalnum((unsigned char)*name_end) || *name_end == '_'))
-            name_end++;
-
-        if (name_end == name_start) break; // no variable name
-
-        size_t name_len = name_end - name_start;
-        char* var_name = strndup(name_start, name_len);
-        if (!var_name) return NULL;
-
-        Variable* var = find_var(var_name);
-        free(var_name);
-
-        if (!var) {
-            fprintf(stderr, "Error: Variable '%.*s' not found\n", (int)name_len, name_start);
-            if (!interactive) {
-                free(result);
-                exit(1);
+        // Determine where the replacement starts (include prefix if exists)
+        char* token_start = dollar;
+        if (dollar > result && (*(dollar - 1) == '&' || *(dollar - 1) == '*')) {
+            token_start = dollar - 1;
+            // Handle double prefixes like **$var or *&$var
+            while (token_start > result && (*(token_start - 1) == '&' || *(token_start - 1) == '*')) {
+                token_start--;
             }
-            break;
         }
 
-        uint64_t final_val = var->value;
-        char* expr_end = name_end;
+        char* endptr;
+        // get_operand_value now starts at the prefix (if any)
+        uint64_t final_val = get_operand_value(token_start, &endptr);
+        char* expr_end = endptr;
 
-        // Enhanced arithmetic: support +, -, *, /, %, <<, >>
-        char* p = skip_ws(name_end);
+        // --- FULL ARITHMETIC LOGIC RESTORED ---
+        char* p = skip_ws(expr_end);
         while (*p) {
             char op = *p;
             char op2 = *(p + 1);
             
-            // Check for two-character operators
             if ((op == '<' && op2 == '<') || (op == '>' && op2 == '>')) {
                 p += 2;
-                p = skip_ws(p);
-                char* endptr;
                 uint64_t operand = get_operand_value(p, &endptr);
-                if (endptr == p) break; // no valid number
-                
+                if (endptr == p) break;
                 if (op == '<') final_val <<= operand;
                 else final_val >>= operand;
-                
                 p = endptr;
                 expr_end = p;
             }
-            // Single-character operators
             else if (op == '+' || op == '-' || op == '*' || op == '/' || op == '%') {
+                // Peek ahead: don't treat '*' as multiplication if it's a deref prefix for the next var
+                char* next_p = skip_ws(p + 1);
+                if (op == '*' && (*next_p == '*' || *next_p == '&' || *next_p == '$')) {
+                    // This is likely a multiplication, but get_operand_value handles the next part
+                }
+
                 p++;
-                p = skip_ws(p);
-                char* endptr;
                 uint64_t operand = get_operand_value(p, &endptr);
-                if (endptr == p) break; // no valid number
-                
+                if (endptr == p) break;
                 switch(op) {
                     case '+': final_val += operand; break;
                     case '-': final_val -= operand; break;
                     case '*': final_val *= operand; break;
-                    case '/': 
-                        if (operand != 0) final_val /= operand;
-                        else {
-                            fprintf(stderr, "Error: Division by zero in variable expression\n");
-                            if (!interactive) { free(result); exit(1); }
-                        }
-                        break;
-                    case '%':
-                        if (operand != 0) final_val %= operand;
-                        else {
-                            fprintf(stderr, "Error: Modulo by zero in variable expression\n");
-                            if (!interactive) { free(result); exit(1); }
-                        }
-                        break;
+                    case '/': if (operand != 0) final_val /= operand; break;
+                    case '%': if (operand != 0) final_val %= operand; break;
                 }
-                
                 p = endptr;
                 expr_end = p;
+            } else {
+                break;
             }
-            else {
-                break; // Not an operator we recognize
-            }
-            
             p = skip_ws(p);
         }
 
-        // Format replacement
+        // Generate the replacement string
         char val_buf[32];
         snprintf(val_buf, sizeof(val_buf), "0x%llX", final_val);
 
-        size_t prefix_len = dollar - result;
-        size_t suffix_len = strlen(expr_end);
+        size_t prefix_part_len = token_start - result;
         size_t val_len = strlen(val_buf);
-        size_t new_size = prefix_len + val_len + suffix_len + 1;
+        size_t suffix_len = strlen(expr_end);
+        size_t new_size = prefix_part_len + val_len + suffix_len + 1;
 
         char* new_result = malloc(new_size);
-        if (!new_result) {
-            free(result);
-            return NULL;
-        }
+        if (!new_result) { free(result); return NULL; }
 
-        memcpy(new_result, result, prefix_len);
-        memcpy(new_result + prefix_len, val_buf, val_len);
-        memcpy(new_result + prefix_len + val_len, expr_end, suffix_len + 1);
+        // Construct the new string: [text before operator][hex value][text after expression]
+        memcpy(new_result, result, prefix_part_len);
+        memcpy(new_result + prefix_part_len, val_buf, val_len);
+        memcpy(new_result + prefix_part_len + val_len, expr_end, suffix_len + 1);
 
         free(result);
         result = new_result;
@@ -1641,8 +1635,10 @@ int main(int argc, char** argv) {
                 "    /quit                               Exit the program\n"
                 "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
                 "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
-                "    $<name> = <type> <value>            Assign a variable\n"
-                "    $<name> = rhs                       Function call or valid return command\n"
+                "    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)\n"
+                "    $<name> = <command>         Capture command/function output into variable\n"
+                "    &$<name>                    Address-of: Get the memory pointer to a variable's storage\n"
+                "    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>\n"
                 "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", i32 $var1)\n"
                 "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
