@@ -63,6 +63,7 @@ Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     str, wstr, voidptr are equivelant to C's "narrow" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)
     In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw bytes). No validation or conversion is performed.
 You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).
+SEH is there to help, but continue at your own risk. In scripts any error is fatal and will exit.
 ```
 
 ## examples

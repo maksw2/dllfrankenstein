@@ -1,5 +1,7 @@
 ; gl3.ffi
 
+$startTime = kernel32.dll u32 GetTickCount()
+
 $CS_OWNDC            = u32 0x0020
 $WS_OVERLAPPEDWINDOW = u32 0x00CF0000
 $WS_VISIBLE          = u32 0x10000000
@@ -105,6 +107,12 @@ void $glLinkProgram(u32 $prog)
 
 $msg = /alloc 48
 /memset $msg 0 48
+
+$endTime = kernel32.dll u32 GetTickCount()
+$elapsedTime = /alloc 8
+/set $elapsedTime i64 $endTime - $startTime
+msvcrt.dll i32 printf(str "time: %dms\n", i64 *$elapsedTime)
+/free $elapsedTime
 
 ; *in an ideal world* we would use PeekMessage but we don't have branching
 /repeat-until { ^

@@ -18,6 +18,9 @@ extern __declspec(dllexport) float Addf(float a, float b) {
     return a + b;
 }
 
+#pragma warning(disable: 4717) // no shit sherlock!
+#pragma warning(disable: 6011)
+
 extern __declspec(dllexport) void AccessViolation() {
     *(int*)0 = 0;
 }

@@ -1,6 +1,3 @@
-; Windows x64 Calling Convention
-; RCX = func_ptr, RDX = args[], R8D = arg_count, R9D = float_mask
-
 .code
 
 call_dynamic_function PROC
