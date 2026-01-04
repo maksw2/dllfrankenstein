@@ -672,6 +672,173 @@ Freed memory at 0x298FF06B3C0
 
 </details>
 
+<details>
+<summary><b>running a script; a complex opengl 3.3 triangle without glfw to help</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl3.ffi
+wilczurski's cool shit - script
+> ; gl3.ffi
+> $CS_OWNDC            = u32 0x0020
+$CS_OWNDC = 0x20
+> $WS_OVERLAPPEDWINDOW = u32 0x00CF0000
+$WS_OVERLAPPEDWINDOW = 0xCF0000
+> $WS_VISIBLE          = u32 0x10000000
+$WS_VISIBLE = 0x10000000
+> $PFD_DRAW_TO_WINDOW  = u32 4
+$PFD_DRAW_TO_WINDOW = 0x4
+> $PFD_SUPPORT_OPENGL  = u32 32
+$PFD_SUPPORT_OPENGL = 0x20
+> $PFD_DOUBLEBUFFER    = u32 1
+$PFD_DOUBLEBUFFER = 0x1
+> $PFD_TYPE_RGBA       = i8 0
+$PFD_TYPE_RGBA = 0x0
+> $GL_COLOR_BUFFER_BIT = i32 0x4000
+$GL_COLOR_BUFFER_BIT = 0x4000
+> $GL_TRIANGLES        = i32 0x0004
+$GL_TRIANGLES = 0x4
+> $GL_ARRAY_BUFFER     = i32 0x8892
+$GL_ARRAY_BUFFER = 0x8892
+> $GL_STATIC_DRAW      = i32 0x88E4
+$GL_STATIC_DRAW = 0x88E4
+> $GL_VERTEX_SHADER    = i32 0x8B31
+$GL_VERTEX_SHADER = 0x8B31
+> $GL_FRAGMENT_SHADER  = i32 0x8B30
+$GL_FRAGMENT_SHADER = 0x8B30
+> $lpfnWndProc = /address test.dll GenericWindowProcA
+[Auto-Registered: test.dll]
+0x7FFAC9FC44D0
+$lpfnWndProc = 0x7FFAC9FC44D0
+> $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
+$hInstance = 0x7FF7776A0000
+> $lpszClassName = str "NativeGLClass"
+$lpszClassName = 0x246437EA0C0
+> $wc = /alloc 72
+0x246437E9610
+$wc = 0x246437E9610
+> /memset $wc 0 72
+Set 72 bytes at 0x246437E9610 to 0x00
+> /set $wc+0  u32 0x0020 ; style = CS_OWNDC
+Value at 0x246437E9610 (u32): 32
+> /set $wc+8  voidptr $lpfnWndProc
+Value at 0x246437E9618 (voidptr): 0x7FFAC9FC44D0
+> /set $wc+24 voidptr $hInstance
+Value at 0x246437E9628 (voidptr): 0x7FF7776A0000
+> /set $wc+64 voidptr $lpszClassName
+Value at 0x246437E9650 (voidptr): 0x246437EA0C0
+> user32.dll u16 RegisterClassA(voidptr $wc) --assert=nonzero
+> $hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "Mann Up GL", u32 0x10CF0000, i32 100, i32 100, i32 640, i32 480, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --assert=nonzero
+$hWnd = 0x1E0A76
+> $hDC = user32.dll voidptr GetDC(voidptr $hWnd) --assert=nonzero
+$hDC = 0xFFFFFFFF9A011A9C
+> $pfd = /alloc 40
+0x2464380C8A0
+$pfd = 0x2464380C8A0
+> /memset $pfd 0 40
+Set 40 bytes at 0x2464380C8A0 to 0x00
+> /set $pfd+0  i16 40             ; nSize
+Value at 0x2464380C8A0 (i16): 40
+> /set $pfd+2  i16 1              ; nVersion
+Value at 0x2464380C8A2 (i16): 1
+> /set $pfd+4  u32 37             ; dwFlags (DRAW_TO_WINDOW | SUPPORT_OPENGL | DOUBLEBUFFER)
+Value at 0x2464380C8A4 (u32): 37
+> /set $pfd+8  i8  0              ; iPixelType (RGBA)
+Value at 0x2464380C8A8 (i8): 0
+> /set $pfd+9  i8  32             ; cColorBits
+Value at 0x2464380C8A9 (i8): 32
+> $pixelFormat = gdi32.dll i32 ChoosePixelFormat(voidptr $hDC, voidptr $pfd) --assert=nonzero
+$pixelFormat = 0x9
+> gdi32.dll i32 SetPixelFormat(voidptr $hDC, i32 $pixelFormat, voidptr $pfd) --assert=nonzero
+> $hRC = opengl32.dll voidptr wglCreateContext(voidptr $hDC) --assert=nonzero
+$hRC = 0x10000
+> opengl32.dll i32 wglMakeCurrent(voidptr $hDC, voidptr $hRC) --assert=nonzero
+> $wglGetProcAddress = /address opengl32.dll wglGetProcAddress
+[Auto-Registered: opengl32.dll]
+0x7FFAE91703F0
+$wglGetProcAddress = 0x7FFAE91703F0
+> $glGenBuffers       = voidptr $wglGetProcAddress(str "glGenBuffers") --assert=nonzero
+$glGenBuffers = 0x7FFAFE1BFBA0
+> $glBindBuffer       = voidptr $wglGetProcAddress(str "glBindBuffer") --assert=nonzero
+$glBindBuffer = 0x7FFAFE1AAF60
+> $glBufferData       = voidptr $wglGetProcAddress(str "glBufferData") --assert=nonzero
+$glBufferData = 0x7FFAFE1AD5E0
+> $glGenVertexArrays  = voidptr $wglGetProcAddress(str "glGenVertexArrays") --assert=nonzero
+$glGenVertexArrays = 0x7FFAFE1C0920
+> $glBindVertexArray  = voidptr $wglGetProcAddress(str "glBindVertexArray") --assert=nonzero
+$glBindVertexArray = 0x7FFAFE1AC1E0
+> $glEnableVertexAttribArray = voidptr $wglGetProcAddress(str "glEnableVertexAttribArray") --assert=nonzero
+$glEnableVertexAttribArray = 0x7FFAFE1BC6E0
+> $glVertexAttribPointer     = voidptr $wglGetProcAddress(str "glVertexAttribPointer") --assert=nonzero
+$glVertexAttribPointer = 0x7FFAFE203E60
+> $glCreateShader     = voidptr $wglGetProcAddress(str "glCreateShader") --assert=nonzero
+$glCreateShader = 0x7FFAFE1B6FE0
+> $glShaderSource     = voidptr $wglGetProcAddress(str "glShaderSource") --assert=nonzero
+$glShaderSource = 0x7FFAFE1EA1E0
+> $glCompileShader    = voidptr $wglGetProcAddress(str "glCompileShader") --assert=nonzero
+$glCompileShader = 0x7FFAFE1B4260
+> $glCreateProgram    = voidptr $wglGetProcAddress(str "glCreateProgram") --assert=nonzero
+$glCreateProgram = 0x7FFAFE1B6BE0
+> $glAttachShader     = voidptr $wglGetProcAddress(str "glAttachShader") --assert=nonzero
+$glAttachShader = 0x7FFAFE1AA4A0
+> $glLinkProgram      = voidptr $wglGetProcAddress(str "glLinkProgram") --assert=nonzero
+$glLinkProgram = 0x7FFAFE1D0F20
+> $glUseProgram       = voidptr $wglGetProcAddress(str "glUseProgram") --assert=nonzero
+$glUseProgram = 0x7FFAFE1F8AE0
+> $vertices = /alloc 24
+0x2464655EAD0
+$vertices = 0x2464655EAD0
+> /set $vertices f32 -0.5
+Value at 0x2464655EAD0 (f32): -0.500000
+> /set $vertices+4 f32 -0.5
+Value at 0x2464655EAD4 (f32): -0.500000
+> /set $vertices+8 f32 0.5
+Value at 0x2464655EAD8 (f32): 0.500000
+> /set $vertices+12 f32 -0.5
+Value at 0x2464655EADC (f32): -0.500000
+> /set $vertices+16 f32 0.0
+Value at 0x2464655EAE0 (f32): 0.000000
+> /set $vertices+20 f32 0.5
+Value at 0x2464655EAE4 (f32): 0.500000
+> $VAO = u32 0
+$VAO = 0x0
+> $VBO = u32 0
+$VBO = 0x0
+> void $glGenVertexArrays(i32 1, voidptr &$VAO)
+> void $glGenBuffers(i32 1, voidptr &$VBO)
+> void $glBindVertexArray(u32 $VAO)
+> void $glBindBuffer(u32 $GL_ARRAY_BUFFER, u32 $VBO)
+> void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STATIC_DRAW)
+> void $glVertexAttribPointer(u32 0, i32 2, i32 0x1406, i8 0, i32 8, voidptr 0)
+> void $glEnableVertexAttribArray(u32 0)
+> $vertex_src = str "  #version 330 core\n  layout (location = 0) in vec2 aPos;\n  void main() { gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0); }"
+$vertex_src = 0x2464639D2D0
+> $fragment_src = str "  #version 330 core\n  out vec4 FragColor;\n  void main() { FragColor = vec4(1.0, 0.5, 0.2, 1.0); }"
+$fragment_src = 0x246461A47B0
+> $vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER)
+$vShader = 0x1
+> $fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER)
+$fShader = 0x2
+> void $glShaderSource(u32 $vShader, i32 1, voidptr &$vertex_src, voidptr 0)
+> void $glCompileShader(u32 $vShader)
+> void $glShaderSource(u32 $fShader, i32 1, voidptr &$fragment_src, voidptr 0)
+> void $glCompileShader(u32 $fShader)
+> $prog = u32 $glCreateProgram()
+$prog = 0x3
+> void $glAttachShader(u32 $prog, u32 $vShader)
+> void $glAttachShader(u32 $prog, u32 $fShader)
+> void $glLinkProgram(u32 $prog)
+> $msg = /alloc 48
+0x24646323530
+$msg = 0x24646323530
+> /memset $msg 0 48
+Set 48 bytes at 0x24646323530 to 0x00
+> ; *in an ideal world* we would use PeekMessage but we don't have branching
+> /repeat-until {       user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,       user32.dll i32 TranslateMessage(voidptr $msg),       user32.dll i64 DispatchMessageA(voidptr $msg),       opengl32.dll void glClear(u32 $GL_COLOR_BUFFER_BIT),       void $glUseProgram(u32 $prog),       void $glBindVertexArray(u32 $VAO),       opengl32.dll void glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),       gdi32.dll i32 SwapBuffers(voidptr $hDC)   }
+> /quit
+```
+
+</details>
+
 ## how 2 contribute
 
 4 spaces, not tabs  
