@@ -1,5 +1,7 @@
 ; gl2.ffi
 
+$startTime = kernel32.dll u32 GetTickCount()
+
 ;#define GL_COLOR_BUFFER_BIT 0x4000
 ;#define GL_TRIANGLES        0x0004
 ;#define GL_ARRAY_BUFFER     0x8892
@@ -156,6 +158,12 @@ void $glLinkProgram(u32 $prog)
 ;    glDeleteShader(fragmentShader);
 void $glDeleteShader(u32 $vertexShader)
 void $glDeleteShader(u32 $fragmentShader)
+
+$endTime = kernel32.dll u32 GetTickCount()
+$elapsedTime = /alloc 8
+/set $elapsedTime i64 $endTime - $startTime
+msvcrt.dll i32 printf(str "time: %dms\n", i64 *$elapsedTime)
+/free $elapsedTime
 
 ;    while (!glfwWindowShouldClose(w)) {
 ;        glClear(GL_COLOR_BUFFER_BIT);

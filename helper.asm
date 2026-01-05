@@ -8,7 +8,7 @@ call_dynamic_function PROC
     push rdi
     push r12
     push r13
-    mov  rbp, rsp       ; Set up our frame pointer after pushes
+    mov rbp, rsp        ; Set up our frame pointer after pushes
     
     ; Now, [rbp] points to the saved r13. 
     ; The stack is currently 8-byte aligned (because we pushed 6 regs + rbp = 7 total).
@@ -75,7 +75,7 @@ load_register_args:
     jnz arg0_float
     jmp arg1
 arg0_float:
-    movq xmm0, rcx             ; Load XMM from RCX (which holds the value)
+    movq xmm0, rcx               ; Load XMM from RCX (which holds the value)
 
 arg1: ; Arg 1
     cmp edi, 2
@@ -85,7 +85,7 @@ arg1: ; Arg 1
     jnz arg1_float
     jmp arg2
 arg1_float:
-    movq xmm1, rdx             ; Load XMM from RDX (which holds the value)
+    movq xmm1, rdx               ; Load XMM from RDX (which holds the value)
 
 arg2: ; Arg 2
     cmp edi, 3
@@ -95,7 +95,7 @@ arg2: ; Arg 2
     jnz arg2_float
     jmp arg3
 arg2_float:
-    movq xmm2, r8              ; Load XMM from R8 (which holds the value)
+    movq xmm2, r8                ; Load XMM from R8 (which holds the value)
 
 arg3: ; Arg 3
     cmp edi, 4
@@ -105,21 +105,21 @@ arg3: ; Arg 3
     jnz arg3_float
     jmp do_call
 arg3_float:
-    movq xmm3, r9              ; Load XMM from R9 (which holds the value)
+    movq xmm3, r9                ; Load XMM from R9 (which holds the value)
 
     ; --- The Call ---
 do_call:
     call rbx
 
-    bt r12d, 31               ; Bit test bit 31
-    jnc ret_integer           ; If carry clear (bit not set), return integer
-    movq rax, xmm0            ; Move float/double bits from XMM0 to RAX
+    bt r12d, 31     ; Bit test bit 31
+    jnc ret_integer ; If carry clear (bit not set), return integer
+    movq rax, xmm0  ; Move float/double bits from XMM0 to RAX
 
 ret_integer:
 
     ; --- Epilogue ---
-    mov rsp, rbp        ; Clean up dynamic stack & restore RSP to saved regs
-    pop r13             ; Pop in reverse order of pushes
+    mov rsp, rbp ; Clean up dynamic stack & restore RSP to saved regs
+    pop r13      ; Pop in reverse order of pushes
     pop r12
     pop rdi
     pop rsi

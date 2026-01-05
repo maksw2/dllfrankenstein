@@ -2,7 +2,7 @@
 
 A raw, unapologetic bridge between man and machine.  
 Manually load DLLs, manipulate memory, and invoke native functions.  
-No runtime. No safety.  
+Minimal runtime. Minimal safety.  
 scary shit
 
 ## warning
@@ -15,7 +15,7 @@ Lying about signatures may corrupt the stack.
 to build the app:
 - `cl /c /Zi caller.c`
 - `ml64 /c helper.asm`
-- `link caller.obj helper.obj /debug /out:caller.exe`
+- `link caller.obj helper.obj /debug /out:invoke.exe`
 
 to build the test dll:
 - `cl /LD /Zi test.c /link /debug user32.lib gdi32.lib legacy_stdio_definitions.lib`
@@ -23,11 +23,11 @@ to build the test dll:
 ## help string
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe
 wilczurski's cool shit - repl + ffi
-Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
+Usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
     <func_name> can be an ordinal #<ordinal>
-    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>
+    or: invoke.exe --interactive [--normal-variables-pretty-please] or invoke.exe --script <script_path>
     Scripts by default use .ffi
     <type> can be: zero, nonzero, negative, nonnegative, not specifying means none
 Usage in interactive/script mode is the same as non-interactive except when focused on a DLL, then you don't need to specify <dll_path>
@@ -72,8 +72,8 @@ SEH is there to help, but continue at your own risk. In scripts any error is fat
 <summary><b>a simple messagebox</b></summary>
 
 ```
-caller.exe user32.dll i32 MessageBoxA(voidptr 0, str "hi", str "title", u32 0)
-caller.exe user32.dll i32 MessageBoxW(voidptr 0, wstr "hi", wstr "title", u32 0)
+invoke.exe user32.dll i32 MessageBoxA(voidptr 0, str "hi", str "title", u32 0)
+invoke.exe user32.dll i32 MessageBoxW(voidptr 0, wstr "hi", wstr "title", u32 0)
 ```
 
 </details>
@@ -88,7 +88,7 @@ idiots.
 ```
 D:\SteamLibrary\steamapps\common\Team Fortress 2>set PATH=%PATH%;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin;D:\SteamLibrary\steamapps\common\Team Fortress 2\bin\x64
 
-D:\SteamLibrary\steamapps\common\Team Fortress 2>caller --interactive -game tf
+D:\SteamLibrary\steamapps\common\Team Fortress 2>invoke.exe --interactive -game tf
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
@@ -119,7 +119,7 @@ Unable to remove d:\steamlibrary\steamapps\common\team fortress 2\tf\textwindow_
 <summary><b>having fun with memory</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $a = /alloc 128
@@ -166,7 +166,7 @@ remember to /memset your memory kids!
 <summary><b>assertions</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > test.dll i32 Add(i32 0, i32 0) --print-result --assert=zero
@@ -192,7 +192,7 @@ C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\Sys
        1481  5C8 00031980 Sleep
 C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\System32\kernel32.dll | findstr Beep
         117   74 0004F780 Beep
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > kernel32.dll void #1481(i32 5000)
@@ -206,7 +206,7 @@ Enter command or /quit to exit.
 <summary><b>SEH covering up my ass</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > test.dll void AccessViolation()
@@ -238,7 +238,7 @@ Reason: Privileged Instruction
 <summary><b>creating a win32 window</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --interactive
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
 > $lpfnWndProc = /address user32.dll DefWindowProcA
@@ -280,7 +280,7 @@ $hWnd = 0x7d0f02
 <summary><b>running a script; creating a win32 window</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --script window.ffi
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --script window.ffi
 wilczurski's cool shit - script
 > ; window.ffi
 > $lpfnWndProc = /address test.dll WindowProcessA
@@ -365,7 +365,7 @@ Freed memory at 0x212EE9FC240
 <summary><b>running a script; creating a win32 window using wide strings</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --script window_w.ffi
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --script window_w.ffi
 wilczurski's cool shit - script
 > ; window_w.ffi
 > $lpfnWndProc = /address test.dll WindowProcessW
@@ -450,7 +450,7 @@ Freed memory at 0x1F65AFE9A10
 <summary><b>running a script; a simple opengl 1.1 triangle</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl.ffi
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --script gl.ffi
 wilczurski's cool shit - script
 > ; gl.ffi
 > /loaddll opengl32.dll
@@ -473,7 +473,7 @@ goodbye!
 <summary><b>running a script; a complex opengl 3.3 triangle</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl2.ffi
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --script gl2.ffi
 wilczurski's cool shit - script
 > ; gl2.ffi
 > ;#define GL_COLOR_BUFFER_BIT 0x4000
@@ -677,7 +677,7 @@ Freed memory at 0x298FF06B3C0
 <summary><b>running a script; a complex opengl 3.3 triangle without glfw to help</b></summary>
 
 ```
-C:\Users\Administrator\Documents\dllfrankenstein>caller --script gl3.ffi
+C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --script gl3.ffi
 wilczurski's cool shit - script
 > ; gl3.ffi
 > $CS_OWNDC            = u32 0x0020
@@ -854,16 +854,25 @@ make a pr
 ## faq
 
 Q: Why make this?  
-A: Because `rundll32.exe` is stupid.
+A: Because `rundll32.exe` is stupid. Everything rundll32 can do, this tool does better and more
+
+Q: What's the use case for it?  
+A: Poking random DLLs without writing C. If you need more structure than that, this probably isn’t for you.
 
 Q: Is this safe?  
-A: In my experience.
+A: In my experience. If you're careful enough.  
+
+Q: But really?  
+A: This is not safer than C. It is often more dangerous, because it removes the compile step that normally slows you down.
+
+Q: Can this brick my system?  
+A: If you're creative enough.
 
 Q: Can I use this in production?  
 A: No warranty.
 
 Q: It crashed!  
-A: Open an issue. **Describe it well.**
+A: Open an issue. **Describe it well.** “It crashed” is not a report.
 
 Q: Does it support all calling conventions?  
 A: Technically.

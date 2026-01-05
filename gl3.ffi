@@ -19,13 +19,22 @@ $GL_FRAGMENT_SHADER  = i32 0x8B30
 $lpfnWndProc = /address test.dll GenericWindowProcA
 $hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
 $lpszClassName = str "NativeGLClass"
+$hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
 
-$wc = /alloc 72
-/memset $wc 0 72
-/set $wc+0  u32 0x0020 ; style = CS_OWNDC
-/set $wc+8  voidptr $lpfnWndProc
-/set $wc+24 voidptr $hInstance
-/set $wc+64 voidptr $lpszClassName
+$wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc, ^
+ i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon, ^
+ $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground, ^
+ voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName }
+
+$wc = /alloc $wc_size
+/memset $wc 0 $wc_size
+
+/set $wc+$style_off u32 0x20
+/set $wc+$lpfnWndProc_off voidptr $lpfnWndProc
+/set $wc+$hInstance_off voidptr $hInstance
+/set $wc+$hCursor_off voidptr $hCursor
+/set $wc+$hbrBackground_off voidptr 6
+/set $wc+$lpszClassName_off voidptr $lpszClassName
 
 user32.dll u16 RegisterClassA(voidptr $wc) --assert=nonzero
 
