@@ -1,14 +1,22 @@
 .code
 
-call_dynamic_function PROC
+call_dynamic_function PROC FRAME
     ; --- Prologue ---
     push rbp            ; Save old frame pointer
+    .pushreg rbp
     push rbx            ; Save non-volatile registers
+    .pushreg rbx
     push rsi
+    .pushreg rsi
     push rdi
+    .pushreg rdi
     push r12
+    .pushreg r12
     push r13
+    .pushreg r13
     mov rbp, rsp        ; Set up our frame pointer after pushes
+    .setframe rbp, 0
+    .endprolog
     
     ; Now, [rbp] points to the saved r13. 
     ; The stack is currently 8-byte aligned (because we pushed 6 regs + rbp = 7 total).

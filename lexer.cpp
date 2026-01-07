@@ -21,7 +21,7 @@ std::vector<Token> tokenize(const char* src) {
         }
 
         // 2. Skip Comments
-        if (p[0] == '/' && p[1] == '/') {
+        if (*p == ';' || (p[0] == '/' && p[1] == '/')) {
             while (*p && *p != '\n') p++;
             continue; 
         }
@@ -118,6 +118,16 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
+        // 7b. Ordinals
+        if (*p == '#') {
+            const char* start = p;
+            p++; // Skip #
+            while (isdigit(*p)) p++;
+            // Treat as IDENTIFIER so the parser accepts it as a function name
+            tokens.push_back({TokenType::TOK_IDENTIFIER, std::string(start, p - start), line, 0});
+            continue;
+        }
+
         // 8. Symbols
         TokenType type = TokenType::TOK_EOF;
         switch (*p) {
@@ -127,12 +137,12 @@ std::vector<Token> tokenize(const char* src) {
             case '}': type = TokenType::TOK_RBRACE; break;
             case ',': type = TokenType::TOK_COMMA; break;
             case '=': type = TokenType::TOK_EQUALS; break;
+            case '&': type = TokenType::TOK_AMP; break;
             // $ handled above
             case '+': type = TokenType::TOK_PLUS; break;
             case '-': type = TokenType::TOK_MINUS; break; // Single minus
             case '*': type = TokenType::TOK_STAR; break;
             case '/': type = TokenType::TOK_SLASH; break;
-            case ';': type = TokenType::TOK_SEMICOLON; break; // Just in case
         }
 
         if (type != TokenType::TOK_EOF) {

@@ -10,6 +10,8 @@ $startTime = kernel32.dll u32 GetTickCount()
 ;#define GL_FRAGMENT_SHADER  0x8B30
 ;#define GL_FLOAT            0x1406
 ;#define GL_FALSE            0
+$GL_MULTISAMPLE = i32 0x809D
+$GLFW_SAMPLES = i32 0x00021005
 $GL_COLOR_BUFFER_BIT = i32 0x4000
 $GL_TRIANGLES        = i32 0x0004
 $GL_ARRAY_BUFFER     = i32 0x8892
@@ -32,19 +34,19 @@ $GL_FALSE            = i32 0
 ;    "void main() {\n"
 ;    "   FragColor = vec4(1.0, 0.5, 0.2, 1.0);\n" // Orange color
 ;    "}";
-$vertex_shader_src = str "^
-    #version 330 core\n^
-    layout (location = 0) in vec2 aPos;\n^
-    void main() {\n^
-        gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);\n^
-    }"
+$vertex_shader_src = str "
+#version 330 core
+layout (location = 0) in vec2 aPos;
+void main() {
+    gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
+}"
 
-$fragment_shader_src = str "^
-    #version 330 core\n^
-    out vec4 FragColor;\n^
-    void main() {\n^
-       FragColor = vec4(1.0, 0.5, 0.2, 1.0);\n^
-    }"
+$fragment_shader_src = str "
+#version 330 core
+out vec4 FragColor;
+void main() {
+    FragColor = vec4(1.0, 0.5, 0.2, 1.0);
+}"
 
 ;int32_t main(void) {
 ;    glfwInit();
@@ -52,6 +54,7 @@ $fragment_shader_src = str "^
 ;    glfwMakeContextCurrent(w);
 /loaddll glfw3.dll
 i32 glfwInit()
+void glfwWindowHint(i32 $GLFW_SAMPLES, i32 4)
 $w = voidptr glfwCreateWindow(i32 640, i32 480, str "Modern Triangle", voidptr 0, voidptr 0) --assert=nonzero
 void glfwMakeContextCurrent(voidptr $w)
 
@@ -91,10 +94,8 @@ $glAttachShader = voidptr glfwGetProcAddress(str "glAttachShader") --assert=nonz
 $glLinkProgram = voidptr glfwGetProcAddress(str "glLinkProgram") --assert=nonzero
 $glUseProgram = voidptr glfwGetProcAddress(str "glUseProgram") --assert=nonzero
 
-$glGetShaderiv = voidptr glfwGetProcAddress(str "glGetShaderiv") --assert=nonzero
-$glGetShaderInfoLog = voidptr glfwGetProcAddress(str "glGetShaderInfoLog") --assert=nonzero
-$glGetProgramiv = voidptr glfwGetProcAddress(str "glGetProgramiv") --assert=nonzero
-$glGetProgramInfoLog = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --assert=nonzero
+$glEnable = voidptr glfwGetProcAddress(str "glEnable") --assert=nonzero
+void $glEnable(u32 $GL_MULTISAMPLE)
 
 ; main
 ;    float vertices[] = {
@@ -102,7 +103,7 @@ $glGetProgramInfoLog = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --a
 ;         0.5f, -0.5f,
 ;         0.0f,  0.5f
 ;    };
-$vertices = /alloc 24
+$vertices = msvcrt.dll voidptr malloc(u64 24) --assert=nonzero
 /set $vertices f32 -0.5
 /set $vertices + 4 f32 -0.5
 /set $vertices + 8 f32 0.5
@@ -117,7 +118,6 @@ $VAO = u32 0
 $VBO = u32 0
 void $glGenVertexArrays(i32 1, voidptr &$VAO)
 void $glGenBuffers(i32 1, voidptr &$VBO)
-
 
 ;    glBindVertexArray(VAO);
 ;    glBindBuffer(GL_ARRAY_BUFFER, VBO);
@@ -159,11 +159,10 @@ void $glLinkProgram(u32 $prog)
 void $glDeleteShader(u32 $vertexShader)
 void $glDeleteShader(u32 $fragmentShader)
 
+; timing
 $endTime = kernel32.dll u32 GetTickCount()
-$elapsedTime = /alloc 8
-/set $elapsedTime i64 $endTime - $startTime
-msvcrt.dll i32 printf(str "time: %dms\n", i64 *$elapsedTime)
-/free $elapsedTime
+$elapsedTime = i64 $endTime - $startTime
+msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime)
 
 ;    while (!glfwWindowShouldClose(w)) {
 ;        glClear(GL_COLOR_BUFFER_BIT);
@@ -173,15 +172,15 @@ msvcrt.dll i32 printf(str "time: %dms\n", i64 *$elapsedTime)
 ;        glfwSwapBuffers(w);
 ;        glfwPollEvents();
 ;    }
-/repeat-until { i32 glfwWindowShouldClose(voidptr $w) --assert=zero,^
-    void $glClear(u32 $GL_COLOR_BUFFER_BIT),^
-    void $glUseProgram(u32 $prog),^
-    void $glBindVertexArray(u32 $VAO),^
-    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),^
-    void glfwSwapBuffers(voidptr $w),^
+/repeat { i32 glfwWindowShouldClose(voidptr $w) --assert=zero,
+    void $glClear(u32 $GL_COLOR_BUFFER_BIT),
+    void $glUseProgram(u32 $prog),
+    void $glBindVertexArray(u32 $VAO),
+    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
+    void glfwSwapBuffers(voidptr $w),
     void glfwPollEvents() }
 
 ; cleanup
-/free $vertices
-
+msvcrt.dll void free(voidptr $vertices)
+msvcrt.dll i32 printf(str "goodbye!\n")
 /quit

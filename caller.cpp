@@ -1,23 +1,22 @@
 #include "lexer.hpp"
+#define WIN32_LEAN_AND_MEAN
+#define NOMIXMAN
 #include <windows.h>
-#include <cstdio>
+#undef FAR
+#undef NEAR
 #include <cstdlib>
-#include <cstring>
 #include <cstdint>
+#include <fstream>
+#include <print>
+#include <format>
+#include <sstream>
+#include <iostream>
+#include <unordered_map>
 #include "common.hpp"
 
-RegisteredDLL g_registry[32];
-int g_registry_count = 0;
-int g_focus_idx = -1;
-
-Struct g_known_structs[256];
-int g_known_struct_count = 0;
-
-Variable g_vars[128];
-int g_var_count = 0;
+std::unordered_map<std::string, Value> vars;
 
 bool g_interactive = false;
-bool g_normal_vars = false;
 bool g_quiet = true;
 bool g_assert_failed = false;
 bool g_in_a_loop = false;
@@ -32,177 +31,176 @@ void print(const char* format, ...) {
 }
 
 // Find a variable by name, returns NULL if not found
-Variable* find_var(const char* name) {
-    for (int i = 0; i < g_var_count; i++) {
-        if (strcmp(g_vars[i].name, name) == 0) {
-            return &g_vars[i];
-        }
-    }
-    return NULL;
-}
-
-// Set a variable (only if not already set)
-bool set_var(const char* name, uint64_t value) {
-    Variable* existing = find_var(name);
-    if (existing) {
-        existing->value = value;
+bool var_get(const std::string& name, Value* out_val) {
+    if (vars.find(name) != vars.end()) {
+        *out_val = vars[name];
         return true;
     }
-    
-    if (g_var_count >= 128) {
-        printf("Error: Maximum number of variables reached\n");
-        if (!g_interactive)
-            exit(1);
-        return false;
+    return false;
+}
+
+// Returns the memory address of the storage for 'name'
+// Used for &$var (passing pointer-to-variable)
+uint64_t var_get_addr(const std::string& name) {
+    // Note: Unordered_map pointers are unstable if rehashed!
+    // But for a single FFI call, it should be safe.
+    if (vars.find(name) == vars.end()) {
+        vars[name] = {TypeKind::TYPE_PTR, 0}; // Create if not exists (Zero init)
     }
-    
-    strncpy(g_vars[g_var_count].name, name, 63);
-    g_vars[g_var_count].name[63] = '\0';
-    g_vars[g_var_count].value = value;
-    g_var_count++;
-    return true;
+    return (uint64_t)&vars[name].value;
+}
+
+// Set a variable
+void var_set(const std::string& name, Value val) {
+    vars[name] = val;
+}
+
+bool var_exists(const std::string& name) {
+    return vars.find(name) != vars.end();
 }
 
 int main(int argc, char** argv) {
     bool help = false;
     const char* script_file = NULL;
-    set_var("i", 0);
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             help = true;
             g_interactive = false;
+            g_quiet = false; // just in case
             script_file = NULL;
             break;
-        }
-        else if (strcmp(argv[i], "--interactive") == 0) {
-            g_interactive = true;
-            if (i + 1 < argc && strcmp(argv[i + 1], "--normal-variables-pretty-please") == 0) {
-                g_normal_vars = true;
-                i++;
-            }
         } else if (strcmp(argv[i], "--script") == 0) {
+            if (g_interactive) {
+                std::println(stderr, "Cannot mix --interactive and --script");
+                return 1;
+            }
             if (i + 1 < argc) {
                 script_file = argv[i + 1];
                 i++;
             } else {
-                fprintf(stderr, "Error: --script requires a file path.\n");
+                std::println(stderr, "Error: --script requires a file path.");
                 return 1;
             }
+        } else if (strcmp(argv[i], "--interactive") == 0) {
+            g_interactive = true;
         } else if (strcmp(argv[i], "--quiet") == 0) {
             g_quiet = false;
         }
     }
 
     if (g_interactive) {
-        printf("wilczurski's cool shit - repl\n");
-        printf("Enter command or /quit to exit.\n");
-        char line[1024];
-        while (1) {
-            printf("> ");
-            if (!fgets(line, sizeof(line), stdin)) break;
-            line[strcspn(line, "\n")] = 0; // remove newline
-            process_command(line);
-        }
-    } else if (script_file) {
-        print("wilczurski's cool shit - script\n");
-        FILE* f = fopen(script_file, "r");
-        if (!f) {
-            fprintf(stderr, "Failed to open script file: %s\n", script_file);
-            return 1;
-        }
+        std::println("wilczurski's cool shit - repl");
+        std::println("Enter command or /quit to exit.");
+        
+        std::string buffer;
+        bool incomplete = false;
 
-        // 1. Determine file size
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        fseek(f, 0, SEEK_SET);
+        while (true) {
+            // Dynamic Prompt
+            std::print("{}", incomplete ? "... " : "> ");
+            std::fflush(stdout);
+            
+            std::string line;
+            if (!std::getline(std::cin, line)) break; // EOF
 
-        // 2. Allocate memory and read the entire file
-        char *content = (char*)malloc(fsize + 1);
-        if (!content) {
-            fprintf(stderr, "Memory allocation failed\n");
-            fclose(f);
-            return 1;
-        }
-        memset(content, 0, fsize);
-        fread(content, 1, fsize, f);
-        content[fsize] = 0; // Null-terminate
-        fclose(f);
-
-        for (int i = 0; i < fsize - 1; i++) {
-            if (content[i] == '^' && (content[i+1] == '\n' || content[i+1] == '\r')) {
-                content[i] = ' ';   // Replace '^' with space
-                content[i+1] = ' '; // Replace '\n' or '\r' with space
+            if (!buffer.empty()) buffer += "\n";
+            buffer += line;
+            
+            try {
+                std::vector<Token> tokens = tokenize(buffer.c_str());
+                parse_and_execute(tokens);
                 
-                // Handle Windows CRLF (\r\n)
-                if (i + 2 < fsize && content[i+1] == '\r' && content[i+2] == '\n') {
-                    content[i+2] = ' ';
-                }
+                buffer.clear();
+                incomplete = false;
+
+            } catch (const IncompleteInput&) {
+                incomplete = true;
+            } catch (const SyntaxError& e) {
+                // In REPL, line 1 is usually the immediate line, so strictly speaking
+                // printing line numbers might be redundant unless it's a multiline block.
+                if (e.line > 0) std::println("Error (Line {}): {}", e.line, e.what());
+                else std::println("Error: {}", e.what());
+                buffer.clear();
+                incomplete = false;
+            } catch (const std::exception& e) {
+                std::println("System Error: {}", e.what());
+                buffer.clear();
+                incomplete = false;
             }
         }
+    }
+    else if (script_file) {
+        print("wilczurski's cool shit - script: %s\n", script_file);
 
-        // 3. Process commands from the buffer
-        char *line = strtok(content, "\n");
-        while (line != NULL) {
-            // line is already null-terminated at the newline by strtok
-            //print("> %s\n", line);
-            //process_command(line);
-            line = strtok(NULL, "\n");
-            //if (g_assert_failed)
-                //break;
-            std::vector<Token> t = tokenize(line);
-            for(auto& tok : t) {
-                printf("Type: %d | Text: %s\n", tok.type, tok.text.c_str());
-            }
-            if (strcmp(line, "/quit") == 0)
-                break;
+        // Use an input file stream
+        std::ifstream file(script_file, std::ios::binary);
+        
+        if (!file) {
+            std::println(stderr, "Failed to open script file: {}", script_file);
+            return 1;
         }
 
-        free(content);
-    } else {
+        // Read the entire file into a std::string efficiently
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string content = buffer.str();
+
+        try {
+            std::vector<Token> tokens = tokenize(content.c_str());
+            parse_and_execute(tokens);
+        } catch (const IncompleteInput&) {
+            std::println(stderr, "Error: Script ended unexpectedly");
+        } catch (const SyntaxError& e) {
+            if (e.line > 0) std::println(stderr, "Script Error at line {}: {}", e.line, e.what());
+            else std::println(stderr, "Script Error: {}", e.what());
+        } catch (const std::exception& e) {
+            std::println(stderr, "Script Error: {}", e.what());
+        }
+    }
+    else {
         if (argc < 2 || help) {
-            printf(
-                "wilczurski's cool shit - repl + ffi\n"
-                "Usage: caller.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
-                "    <func_name> can be an ordinal #<ordinal>\n"
-                "    or: caller.exe --interactive [--normal-variables-pretty-please] or caller.exe --script <script_path>\n"
-                "    Scripts by default use .ffi\n"
-                "    <type> can be: zero, nonzero, negative, nonnegative, not specifying means none\n"
+            std::print(
+                "wilczurski's cool shit - ffi\n"
+                "Usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]\n"
+                "    <func_name> can be an ordinal like #<ordinal>\n"
+                "    or: invoke.exe --interactive or invoke.exe --script <script_path>\n"
+                "    <type> can be: zero, nonzero, negative, nonnegative\n"
+                "    Scripts by default use .ffi, not enforced\n"
                 "Usage in interactive/script mode is the same as non-interactive except when focused on a DLL, then you don't need to specify <dll_path>\n"
+                "Example: /loaddll kernel32.dll\n         void Sleep(i32 5000)\n"
                 "Additional usage in interactive/script mode:\n"
-                "    To write a comment use ; like assembly\n"
-                "    /enable-normal-variables-pretty-please Enables \"normal variables\" in scripts or interactive mode if you forgot to add the flag\n"
-                "    /loaddll <path>                     Load and focus a DLL, not required mind you\n"
-                "    /freedll <path>                     Unload a DLL from registry\n"
-                "    /alloc   <size>                     Allocate memory. Provide <size> in bytes\n"
-                "    /free    <addr>                     Free allocated memory\n"
+                "    To write a comment use ; like in assembly\n"
+                "    /loaddll <path>                     Load and focus a DLL or just focus if loaded\n"
+                "    /freedll <path>                     Unload a DLL\n"
                 "    /set     <addr>     <type>  <value> Store a value at a memory address\n"
-                "    /memset  <addr>     <value> [count] Set a block of memory to a byte value\n"
                 "    /get     <addr>     <type>          Get a value from a memory address\n"
-                "    /hex     <addr>     [count]         Hex dump memory (default 64 bytes)\n"
-                "    /address <dll_path> <name>          Get a function pointer by name\n"
-                "    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct\n"
-                "    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign them\n"
+                "    /hex     <addr>     [count]         Hex dump memory\n"
+                "    /address <dll_path> <name>          Get a function pointer by name or #ordinal\n"
+                "    /struct  {{ <type> <name>, ... }}     Calculate the offsets and size of a struct.\n"
+                "    /struct  {{ $<name> = <type> <name>, ... }} Calculate the offsets and size of a struct and assign offsets.\n"
+                "    Both assume default packing and return the size. You can have structs in structs.\n"
                 "    /dlls                               List loaded DLLs\n"
-                "    /for     <count>    {<cmd>, ...}    Repeat {} <count> times\n"
-                "    /repeat-until       {<cmd>, ...}    Repeat {} until assert\n"
+                "    /for     <count>    {{<cmd>, ...}}    Repeat {{}} <count> times\n"
+                "    /repeat             {{<cmd>, ...}}    Repeat {{}} until assert failure\n"
                 "    /quit                               Exit the program\n"
-                "Variables by default are Write-Once Read-Many, no shadowing, no scopes.\n"
-                "    --normal-variables-pretty-please allows reassignment. Not recommended.\n"
+                "Variables have no scopes.\n"
                 "    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)\n"
                 "    $<name> = <command>         Capture command/function output into variable\n"
                 "    &$<name>                    Address-of: Get the memory pointer to a variable's storage\n"
                 "    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>\n"
                 "    $i is a reserved variable for loop iterations. It is intentionally not reset on break\n"
-                "    Variables can be used as function arguments, like test.dll void print(str \"%%d\", i32 $var1)\n"
-                "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
+                "    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)\n"
+                "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678\n"
                 "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
-                "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double,\n"
-                "    str, wstr, voidptr are equivelant to C's \"narrow\" null-terminated string (char*), wide string (wchar_t*), pointer (void*, always hex)\n"
-                "    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw bytes). No validation or conversion is performed.\n"
-                "You can pass hex and decimal values; strtoll or strtoull will evaluate them depending on type (except pointers).\n"
-                "SEH is there to help, but continue at your own risk. In scripts any error is fatal and will exit.\n"
+                "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double\n"
+                "    str, wstr, voidptr are equivelant to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)\n"
+                "    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes)."
+                "    No validation or conversion is performed.\n"
+                "You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage.\n"
+                "SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands.\n"
+                "Any error is fatal when running a script.\n"
             );
             return 1;
         }
@@ -211,15 +209,28 @@ int main(int argc, char** argv) {
         // Reconstruct the command line excluding the program name for the parser
         char* p = GetCommandLineA();
         
-        // Skip exe name
-        if (*p == '"') {
-            p++; while (*p && *p != '"') p++;
-            if (*p == '"') p++;
-        } else {
-            while (*p && *p != ' ') p++;
+        // Skip executable name safely
+        bool in_quote = false;
+        while (*p) {
+            if (*p == '"') in_quote = !in_quote;
+            else if (*p == ' ' && !in_quote) {
+                p++; 
+                break;
+            }
+            p++;
         }
         
-        process_command(strdup(p));
+        try {
+            std::vector<Token> tokens = tokenize(p);
+            parse_and_execute(tokens);
+        } catch (const SyntaxError& e) {
+            // One-shot doesn't have relevant line numbers, ignore them
+            std::println("Error: {}", e.what());
+            return 1;
+        } catch (const std::exception& e) {
+            std::println("Error: {}", e.what());
+            return 1;
+        }
     }
 
     return 0;
