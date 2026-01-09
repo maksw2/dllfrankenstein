@@ -270,6 +270,9 @@ A: If you're creative enough.
 Q: Can I use this in production?  
 A: No warranty.
 
+Q: Why is the syntax like this?  
+A: It made sense at 3 AM.
+
 Q: It crashed!  
 A: Open an issue. **Describe it well.** “It crashed” is not a report.
 
