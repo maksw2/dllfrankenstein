@@ -21,6 +21,51 @@ bool g_quiet = true;
 bool g_assert_failed = false;
 bool g_in_a_loop = false;
 
+const std::string help_string = R"(
+wilczurski's cool shit - ffi
+Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...)
+        [--print-result] [--assert[v]=<type>]
+    <func_name> can be an ordinal like #<ordinal>
+    or: invoke.exe --interactive or invoke.exe --script <script_path>
+    <type> can be: zero, nonzero, negative, nonnegative
+    assertv reports success/failure where assert exits if failure
+    The exception to this is usage in loops, there it is used as an exit condition
+    Scripts by default use .ffi, it is not enforced
+Usage in interactive/script mode is the same as non-interactive with more features
+    except when focused on a DLL, then you don't need to specify <dll_path>
+Commands in interactive/script mode:
+    To write a comment use ; like in assembly
+    /loaddll <path>                     Load and focus a DLL or just focus if loaded
+    /freedll <path>                     Unload a DLL
+    /set     <addr>     <type>  <value> Store a value at a memory address
+    /get     <addr>     <type>          Get a value from a memory address
+    /hex     <addr>     [count]         Hex dump memory
+    /address <dll_path> <name>          Get a function pointer by name or #ordinal
+    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
+    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets
+    Both assume default packing and return the size. You can have structs in structs
+    /dlls                               List loaded DLLs
+    /for     <count>    {<cmd>, ...}    Repeat {} <count> times
+    /repeat             {<cmd>, ...}    Repeat {} until assert failure
+    /quit                               Exit the program
+Variables have no scopes and should not be modified by any callee, for that use malloc
+    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)
+    $<name> = <command>         Capture command/function output into variable
+    &$<name>                    Address-of: Get the memory pointer to a variable's storage
+    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
+    $i is a reserved variable for loop iterations. It is intentionally not reset on break
+    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)
+    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
+Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
+    Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
+    str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
+    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).
+    No validation or conversion is performed
+You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage
+SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands
+Any error is fatal when running a script
+)";
+
 void print(const char* format, ...) {
     if (g_quiet) {
         va_list args;
@@ -193,49 +238,7 @@ int main(int argc, char** argv) {
     }
     else {
         if (argc < 2 || help) {
-            std::print(
-                "wilczurski's cool shit - ffi\n"
-                "Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert[v]=<type>]\n"
-                "    <func_name> can be an ordinal like #<ordinal>\n"
-                "    or: invoke.exe --interactive or invoke.exe --script <script_path>\n"
-                "    <type> can be: zero, nonzero, negative, nonnegative\n"
-                "    assertv reports success/failure where assert exits if failure\n"
-                "    The exception to this is usage in loops, there it is used as an exit condition\n"
-                "    Scripts by default use .ffi, it is not enforced\n"
-                "Usage in interactive/script mode is the same as non-interactive with more features\n"
-                "    except when focused on a DLL, then you don't need to specify <dll_path>\n"
-                "Commands in interactive/script mode:\n"
-                "    To write a comment use ; like in assembly\n"
-                "    /loaddll <path>                     Load and focus a DLL or just focus if loaded\n"
-                "    /freedll <path>                     Unload a DLL\n"
-                "    /set     <addr>     <type>  <value> Store a value at a memory address\n"
-                "    /get     <addr>     <type>          Get a value from a memory address\n"
-                "    /hex     <addr>     [count]         Hex dump memory\n"
-                "    /address <dll_path> <name>          Get a function pointer by name or #ordinal\n"
-                "    /struct  {{ <type> <name>, ... }}     Calculate the offsets and size of a struct\n"
-                "    /struct  {{ $<name> = <type> <name>, ... }} Calculate the offsets and size of a struct and assign offsets\n"
-                "    Both assume default packing and return the size. You can have structs in structs\n"
-                "    /dlls                               List loaded DLLs\n"
-                "    /for     <count>    {{<cmd>, ...}}    Repeat {{}} <count> times\n"
-                "    /repeat             {{<cmd>, ...}}    Repeat {{}} until assert failure\n"
-                "    /quit                               Exit the program\n"
-                "Variables have no scopes and should not be modified by any callee, for that use malloc\n"
-                "    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)\n"
-                "    $<name> = <command>         Capture command/function output into variable\n"
-                "    &$<name>                    Address-of: Get the memory pointer to a variable's storage\n"
-                "    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>\n"
-                "    $i is a reserved variable for loop iterations. It is intentionally not reset on break\n"
-                "    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)\n"
-                "    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'\n"
-                "Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void\n"
-                "    Or their \"proper\" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double\n"
-                "    str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)\n"
-                "    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes)."
-                "    No validation or conversion is performed\n"
-                "You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage\n"
-                "SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands\n"
-                "Any error is fatal when running a script\n"
-            );
+            std::print("{}", help_string.substr(1));
             return 1;
         }
         print("wilczurski's cool shit - one-shot\n");

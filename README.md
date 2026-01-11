@@ -21,7 +21,8 @@ to build the test dll:
 
 ```
 wilczurski's cool shit - ffi
-Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert[v]=<type>]
+Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...)
+        [--print-result] [--assert[v]=<type>]
     <func_name> can be an ordinal like #<ordinal>
     or: invoke.exe --interactive or invoke.exe --script <script_path>
     <type> can be: zero, nonzero, negative, nonnegative
@@ -51,12 +52,13 @@ Variables have no scopes and should not be modified by any callee, for that use 
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
     *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
-    Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
+    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
     str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
-    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).    No validation or conversion is performed
+    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).
+    No validation or conversion is performed
 You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage
 SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands
 Any error is fatal when running a script
