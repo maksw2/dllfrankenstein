@@ -22,7 +22,7 @@ enum class TokenType {
 };
 
 struct Token {
-    TokenType type;
+    enum TokenType type;
     std::string text; 
     int line;         // For error reporting
     uint64_t int_val; // Pre-parsed integer value if type == TOK_INTEGER

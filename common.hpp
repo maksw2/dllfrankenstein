@@ -41,6 +41,7 @@ struct CallSpec {
     char func_name[128];
     TypeKind return_type;
     AssertType assert_type;
+    bool fatal;
     Value args[16];
     int arg_count;
     int print_result;

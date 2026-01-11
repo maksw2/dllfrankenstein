@@ -21,10 +21,12 @@ to build the test dll:
 
 ```
 wilczurski's cool shit - ffi
-Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert=<type>]
+Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...) [--print-result] [--assert[v]=<type>]
     <func_name> can be an ordinal like #<ordinal>
     or: invoke.exe --interactive or invoke.exe --script <script_path>
     <type> can be: zero, nonzero, negative, nonnegative
+    assertv reports success/failure where assert exits if failure
+    The exception to this is usage in loops, there it is used as an exit condition
     Scripts by default use .ffi, it is not enforced
 Usage in interactive/script mode is the same as non-interactive with more features
     except when focused on a DLL, then you don't need to specify <dll_path>
@@ -36,28 +38,28 @@ Commands in interactive/script mode:
     /get     <addr>     <type>          Get a value from a memory address
     /hex     <addr>     [count]         Hex dump memory
     /address <dll_path> <name>          Get a function pointer by name or #ordinal
-    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct.
-    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets.
-    Both assume default packing and return the size. You can have structs in structs.
+    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
+    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets
+    Both assume default packing and return the size. You can have structs in structs
     /dlls                               List loaded DLLs
     /for     <count>    {<cmd>, ...}    Repeat {} <count> times
     /repeat             {<cmd>, ...}    Repeat {} until assert failure
     /quit                               Exit the program
-Variables have no scopes and should not be modified by any callee, for that use malloc.
+Variables have no scopes and should not be modified by any callee, for that use malloc
     $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)
     $<name> = <command>         Capture command/function output into variable
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
     *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
     Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
-    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678
+    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
     str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
-    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).    No validation or conversion is performed.
-You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage.
-SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands.
-Any error is fatal when running a script.
+    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).    No validation or conversion is performed
+You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage
+SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands
+Any error is fatal when running a script
 ```
 
 ## examples

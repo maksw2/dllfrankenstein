@@ -647,10 +647,12 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
         if (spec->assert_type == AssertType::ASSERT_NEGATIVE && (int64_t)result >= 0) fail = true;
         if (spec->assert_type == AssertType::ASSERT_NON_NEGATIVE && (int64_t)result < 0) fail = true;
         
-        if (fail) {
+        if (fail && spec->fatal) {
             g_assert_failed = true;
             if (!g_in_a_loop)
                 printf("Assertion Failed for result: %llu\n", result);
+        } else if (!spec->fatal) {
+            return !fail;
         }
     }
 
@@ -850,10 +852,14 @@ static void parse_statement(ParseContext* ctx) {
         while(peek(ctx).type == TokenType::TOK_FLAG) {
             std::string f = advance(ctx).text;
             if (f == "--print-result") spec.print_result = 1;
-            else if (f == "--assert=zero") spec.assert_type = AssertType::ASSERT_ZERO;
-            else if (f == "--assert=nonzero") spec.assert_type = AssertType::ASSERT_NOT_ZERO;
-            else if (f == "--assert=negative") spec.assert_type = AssertType::ASSERT_NEGATIVE;
-            else if (f == "--assert=nonnegative") spec.assert_type = AssertType::ASSERT_NON_NEGATIVE;
+            else if (f == "--assert=zero") { spec.assert_type = AssertType::ASSERT_ZERO; spec.fatal = true; }
+            else if (f == "--assert=nonzero") { spec.assert_type = AssertType::ASSERT_NOT_ZERO; spec.fatal = true; }
+            else if (f == "--assert=negative") { spec.assert_type = AssertType::ASSERT_NEGATIVE; spec.fatal = true; }
+            else if (f == "--assert=nonnegative") { spec.assert_type = AssertType::ASSERT_NON_NEGATIVE; spec.fatal = true; }
+            else if (f == "--assertv=zero") spec.assert_type = AssertType::ASSERT_ZERO;
+            else if (f == "--assertv=nonzero") spec.assert_type = AssertType::ASSERT_NOT_ZERO;
+            else if (f == "--assertv=negative") spec.assert_type = AssertType::ASSERT_NEGATIVE;
+            else if (f == "--assertv=nonnegative") spec.assert_type = AssertType::ASSERT_NON_NEGATIVE;
         }
         
         uint64_t res = execute_dll_call(&spec, line_of_call);
@@ -878,5 +884,6 @@ void parse_and_execute(std::vector<Token>& tokens) {
     while(ctx.pos < ctx.tokens.size()) {
         if (peek(&ctx).type == TokenType::TOK_EOF) break;
         parse_statement(&ctx);
+        if (g_assert_failed) throw std::runtime_error("Assertion failed.");
     }
 }
