@@ -1,0 +1,190 @@
+; gl5.ffi
+
+$startTime = kernel32.dll u32 GetTickCount()
+
+; OpenGL Constants
+$GL_COLOR_BUFFER_BIT = i32 0x4000
+$GL_TRIANGLES        = i32 0x0004
+$GL_ARRAY_BUFFER     = i32 0x8892
+$GL_STATIC_DRAW      = i32 0x88E4
+$GL_VERTEX_SHADER    = i32 0x8B31
+$GL_FRAGMENT_SHADER  = i32 0x8B30
+$GL_FLOAT            = i32 0x1406
+$GL_FALSE            = i32 0
+
+; GLFW Key Constants
+$KEY_RIGHT = i32 262
+$KEY_LEFT  = i32 263
+$KEY_DOWN  = i32 264
+$KEY_UP    = i32 265
+
+; Boundary Constants (NDC space: -1.0 to 1.0, with triangle size offset)
+$BOUND_LEFT   = f32 -0.9
+$BOUND_RIGHT  = f32 0.9
+$BOUND_BOTTOM = f32 -0.9
+$BOUND_TOP    = f32 0.9
+
+; Shaders
+
+$vertex_shader_src = str "
+#version 330 core
+layout (location = 0) in vec2 aPos;
+uniform vec2 uOffset;
+void main() {
+    gl_Position = vec4(aPos.x + uOffset.x, aPos.y + uOffset.y, 0.0, 1.0);
+}"
+
+$fragment_shader_src = str "
+#version 330 core
+out vec4 FragColor;
+void main() {
+    FragColor = vec4(0.2, 0.8, 1.0, 1.0); 
+}"
+
+; Initialization
+
+/loaddll glfw3.dll
+i32 glfwInit()
+$w = voidptr glfwCreateWindow(i32 800, i32 600, str "Bounded Movement", voidptr 0, voidptr 0) --assert=nonzero
+void glfwMakeContextCurrent(voidptr $w)
+
+; Load GL Functions 
+$glClear         = voidptr glfwGetProcAddress(str "glClear") --assert=nonzero
+$glDrawArrays    = voidptr glfwGetProcAddress(str "glDrawArrays") --assert=nonzero
+$glGenBuffers    = voidptr glfwGetProcAddress(str "glGenBuffers") --assert=nonzero
+$glBindBuffer    = voidptr glfwGetProcAddress(str "glBindBuffer") --assert=nonzero
+$glBufferData    = voidptr glfwGetProcAddress(str "glBufferData") --assert=nonzero
+$glGenVertexArrays = voidptr glfwGetProcAddress(str "glGenVertexArrays") --assert=nonzero
+$glBindVertexArray = voidptr glfwGetProcAddress(str "glBindVertexArray") --assert=nonzero
+$glEnableVertexAttribArray = voidptr glfwGetProcAddress(str "glEnableVertexAttribArray") --assert=nonzero
+$glVertexAttribPointer = voidptr glfwGetProcAddress(str "glVertexAttribPointer") --assert=nonzero
+$glCreateShader  = voidptr glfwGetProcAddress(str "glCreateShader") --assert=nonzero
+$glShaderSource  = voidptr glfwGetProcAddress(str "glShaderSource") --assert=nonzero
+$glCompileShader = voidptr glfwGetProcAddress(str "glCompileShader") --assert=nonzero
+$glCreateProgram = voidptr glfwGetProcAddress(str "glCreateProgram") --assert=nonzero
+$glAttachShader  = voidptr glfwGetProcAddress(str "glAttachShader") --assert=nonzero
+$glLinkProgram   = voidptr glfwGetProcAddress(str "glLinkProgram") --assert=nonzero
+$glUseProgram    = voidptr glfwGetProcAddress(str "glUseProgram") --assert=nonzero
+$glDeleteShader  = voidptr glfwGetProcAddress(str "glDeleteShader") --assert=nonzero
+$glGetUniformLocation = voidptr glfwGetProcAddress(str "glGetUniformLocation") --assert=nonzero
+$glUniform2f          = voidptr glfwGetProcAddress(str "glUniform2f") --assert=nonzero
+
+; Load math functions for clamping
+/loaddll ucrtbase.dll
+$fminf = /address ucrtbase.dll fminf
+$fmaxf = /address ucrtbase.dll fmaxf
+
+; Mesh Setup
+
+$vertices = voidptr malloc(u64 24) --assert=nonzero
+/set $vertices    f32 -0.1
+/set $vertices+4  f32 -0.1
+/set $vertices+8  f32  0.1
+/set $vertices+12 f32 -0.1
+/set $vertices+16 f32  0.0
+/set $vertices+20 f32  0.1
+
+$VAO = u32 0
+$VBO = u32 0
+void $glGenVertexArrays(i32 1, voidptr &$VAO)
+void $glGenBuffers(i32 1, voidptr &$VBO)
+
+void $glBindVertexArray(u32 $VAO)
+void $glBindBuffer(u32 $GL_ARRAY_BUFFER, u32 $VBO)
+void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STATIC_DRAW)
+
+void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, voidptr 0)
+void $glEnableVertexAttribArray(u32 0)
+
+; Shader Compilation
+
+$vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
+void $glShaderSource(u32 $vShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
+void $glCompileShader(u32 $vShader)
+
+$fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
+void $glShaderSource(u32 $fShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
+void $glCompileShader(u32 $fShader)
+
+$prog = u32 $glCreateProgram()
+void $glAttachShader(u32 $prog, u32 $vShader)
+void $glAttachShader(u32 $prog, u32 $fShader)
+void $glLinkProgram(u32 $prog)
+void $glDeleteShader(u32 $vShader)
+void $glDeleteShader(u32 $fShader)
+
+$uOffsetLoc = i32 $glGetUniformLocation(u32 $prog, str "uOffset")
+
+; Using function pointers is a bit faster
+$glfwWindowShouldClose = /address glfw3.dll glfwWindowShouldClose
+$glfwGetKey = /address glfw3.dll glfwGetKey
+$glfwSwapBuffers = /address glfw3.dll glfwSwapBuffers
+$glfwPollEvents = /address glfw3.dll glfwPollEvents
+
+; Timing
+$endTime = kernel32.dll u32 GetTickCount()
+$elapsedTime = i64 $endTime - $startTime
+msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime) ; stupid microsoft
+
+; State Variables
+$lastFrameTime = kernel32.dll u32 GetTickCount()
+$unitsPerSecond = f32 1.5
+$posX = f32 0.0
+$posY = f32 0.0
+
+; Main Loop
+/repeat { 
+    i32 $glfwWindowShouldClose(voidptr $w) --assert=zero,
+
+    ;kernel32.dll void Sleep(i32 100),
+
+    $currentFrameTime = kernel32.dll u32 GetTickCount(),
+    $deltaTimeMS = i32 $currentFrameTime - $lastFrameTime,
+    $lastFrameTime = u32 $currentFrameTime,
+
+    $dt = f32 $deltaTimeMS,
+    $dt = f32 $dt / 1000.0,
+
+    ; X Movement
+    $right = i32 $glfwGetKey(voidptr $w, i32 $KEY_RIGHT),
+    $left  = i32 $glfwGetKey(voidptr $w, i32 $KEY_LEFT),
+    $dirX  = i32 $right - $left,
+    
+    $moveX = f32 $dirX,
+    $moveX = f32 $moveX * $unitsPerSecond,
+    $moveX = f32 $moveX * $dt, 
+    $posX  = f32 $posX + $moveX,
+
+    ; Y Movement
+    $up    = i32 $glfwGetKey(voidptr $w, i32 $KEY_UP),
+    $down  = i32 $glfwGetKey(voidptr $w, i32 $KEY_DOWN),
+    $dirY  = i32 $up - $down,
+    
+    $moveY = f32 $dirY,
+    $moveY = f32 $moveY * $unitsPerSecond,
+    $moveY = f32 $moveY * $dt,
+    $posY  = f32 $posY + $moveY,
+
+    ; Boundary Clamping
+    ; Clamp X: posX = max(BOUND_LEFT, min(posX, BOUND_RIGHT))
+    $posX = f32 $fminf(f32 $posX, f32 $BOUND_RIGHT),
+    $posX = f32 $fmaxf(f32 $posX, f32 $BOUND_LEFT),
+    
+    ; Clamp Y: posY = max(BOUND_BOTTOM, min(posY, BOUND_TOP))
+    $posY = f32 $fminf(f32 $posY, f32 $BOUND_TOP),
+    $posY = f32 $fmaxf(f32 $posY, f32 $BOUND_BOTTOM),
+
+    ; Draw
+    void $glClear(u32 $GL_COLOR_BUFFER_BIT),
+    void $glUseProgram(u32 $prog),
+    void $glUniform2f(i32 $uOffsetLoc, f32 $posX, f32 $posY),
+    void $glBindVertexArray(u32 $VAO),
+    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
+    void $glfwSwapBuffers(voidptr $w),
+    void $glfwPollEvents() 
+}
+
+; Cleanup
+msvcrt.dll i32 printf(str "goodbye!\n")
+void free(voidptr $vertices)
+/quit

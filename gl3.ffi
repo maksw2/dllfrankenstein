@@ -125,6 +125,7 @@ $elapsedTime = i64 $endTime - $startTime
 msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime)
 
 ; *in an ideal world* we would use PeekMessage and shit but we don't have branching
+; good enough™
 /repeat {
     user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,
     user32.dll i32 TranslateMessage(voidptr $msg),

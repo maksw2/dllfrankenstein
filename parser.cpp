@@ -456,9 +456,9 @@ static uint64_t handle_address(ParseContext* ctx) {
             func_ptr = (void*)GetProcAddress(h, func_name.c_str());
         }
         if (func_ptr) printf("%s!%s = 0x%llX\n", dll_name.c_str(), func_name.c_str(), (uint64_t)func_ptr);
-        else printf("Function not found\n");
+        else throw std::runtime_error("Function not found\n");
     } else {
-        printf("DLL not found\n");
+        throw std::runtime_error("DLL not found\n");
     }
     return (uint64_t)func_ptr;
 }
