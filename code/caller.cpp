@@ -17,7 +17,7 @@
 std::unordered_map<std::string, Value> vars;
 
 bool g_interactive = false;
-bool g_quiet = true;
+bool g_quiet = false;
 bool g_assert_failed = false;
 bool g_in_a_loop = false;
 
@@ -67,7 +67,7 @@ Any error is fatal when running a script
 )";
 
 void print(const char* format, ...) {
-    if (g_quiet) {
+    if (!g_quiet) {
         va_list args;
         va_start(args, format);
         vprintf(format, args);
@@ -139,28 +139,40 @@ int main(int argc, char** argv) {
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0) {
+        std::string_view arg = argv[i];
+
+        if (arg == "--help") {
             help = true;
             g_interactive = false;
-            g_quiet = false; // just in case
-            script_file = NULL;
-            break;
-        } else if (strcmp(argv[i], "--script") == 0) {
+            g_quiet = false;
+            script_file = nullptr;
+            break; // Exit parsing early for help
+        } 
+        else if (arg == "--script") {
             if (g_interactive) {
-                std::println(stderr, "Cannot mix --interactive and --script");
+                std::cerr << "Error: Cannot mix --interactive and --script\n";
                 return 1;
             }
             if (i + 1 < argc) {
-                script_file = argv[i + 1];
-                i++;
+                script_file = argv[++i]; // Increment i to skip the filename
             } else {
-                std::println(stderr, "Error: --script requires a file path.");
+                std::cerr << "Error: --script requires a file path.\n";
                 return 1;
             }
-        } else if (strcmp(argv[i], "--interactive") == 0) {
+        } 
+        else if (arg == "--interactive") {
+            if (script_file != nullptr) {
+                std::cerr << "Error: Cannot mix --interactive and --script\n";
+                return 1;
+            }
             g_interactive = true;
-        } else if (strcmp(argv[i], "--quiet") == 0) {
-            g_quiet = false;
+        } 
+        else if (arg == "--quiet") {
+            g_quiet = true;
+        } 
+        else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            return 1;
         }
     }
 

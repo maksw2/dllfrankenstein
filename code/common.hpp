@@ -28,7 +28,8 @@ enum class AssertType {
     ASSERT_ZERO,
     ASSERT_NOT_ZERO,
     ASSERT_NEGATIVE,
-    ASSERT_NON_NEGATIVE
+    ASSERT_NON_NEGATIVE,
+    ASSERT_POSITIVE
 };
 
 struct Value {
@@ -42,6 +43,7 @@ struct CallSpec {
     TypeKind return_type;
     AssertType assert_type;
     bool fatal;
+    bool continue_on_fail;
     Value args[16];
     int arg_count;
     int print_result;

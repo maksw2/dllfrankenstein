@@ -1,9 +1,5 @@
 .vscode/
-*.exe
-*.ilk
-*.obj
-*.pdb
-*.exp
-*.lib
-*.dll
-!glfw3.dll
+invoke.exe
+invoke.pdb
+examples/test.dll
+obj/

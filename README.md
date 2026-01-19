@@ -2,12 +2,18 @@
 
 A raw, unapologetic bridge between man and machine.  
 Manually load DLLs, manipulate memory, and invoke native functions.  
+With great power comes great segfaults.  
 scary shit
 
 ## warning
 
-This tool is unsafe by design.  
-Lying about signatures may corrupt the stack.
+Lying about signatures may corrupt memory, program state, or cause delayed crashes.
+
+The stack is protected.  
+The registers are protected.  
+The heap is not.  
+Reality is not.  
+The ABI is respected. Your arguments are not.
 
 ## how 2 use it
 
@@ -15,7 +21,7 @@ to build the app:
 - `build.bat`
 
 to build the test dll:
-- `cl /LD /Zi test.c /link /debug user32.lib gdi32.lib legacy_stdio_definitions.lib`
+- `cl /LD /Zi code\test.c /link /debug /out:examples\test.dll user32.lib gdi32.lib legacy_stdio_definitions.lib`
 
 ## help string
 
@@ -83,7 +89,7 @@ because tf2 reads from GetCommandLineA and not from lpCmdLine we have to pass pa
  for LauncherMain in our parameters and a dummy string in LauncherMain.  
 idiots.
 
-![alt text](image-6.png)
+![alt text](readme-images/image-6.png)
 
 </details>
 
@@ -203,49 +209,74 @@ Reason: Privileged Instruction
 <details>
 <summary><b>creating a win32 window</b></summary>
 
-![alt text](image-5.png)
+![alt text](readme-images/image-5.png)
+
+</details>
+
+### scripts
+
+<details>
+<summary><b>creating a win32 window</b></summary>
+
+![alt text](readme-images/image.png)
 
 </details>
 
 <details>
-<summary><b>running a script; creating a win32 window</b></summary>
+<summary><b>creating a win32 window using wide strings</b></summary>
 
-![alt text](image.png)
-
-</details>
-
-<details>
-<summary><b>running a script; creating a win32 window using wide strings</b></summary>
-
-![alt text](image-1.png)
+![alt text](readme-images/image-1.png)
 
 </details>
 
 <details>
-<summary><b>running a script; a simple opengl 1.1 triangle</b></summary>
+<summary><b>a simple opengl 1.1 triangle</b></summary>
 
-![alt text](image-2.png)
-
-</details>
-
-<details>
-<summary><b>running a script; a complex opengl 3.3 triangle</b></summary>
-
-![alt text](image-3.png)
+![alt text](readme-images/image-2.png)
 
 </details>
 
 <details>
-<summary><b>running a script; a complex opengl 3.3 triangle without glfw to help</b></summary>
+<summary><b>a complex opengl 3.3 triangle</b></summary>
 
-![alt text](image-4.png)
+![alt text](readme-images/image-3.png)
 
 </details>
 
 <details>
-<summary><b>running a script; a complex opengl 3.3 triangle with controls</b></summary>
+<summary><b>a complex opengl 3.3 triangle without glfw to help</b></summary>
 
-![alt text](image-7.gif)
+![alt text](readme-images/image-4.png)
+
+</details>
+
+<details>
+<summary><b>a complex opengl 3.3 triangle with controls</b></summary>
+
+![alt text](readme-images/image-7.gif)
+
+</details>
+
+<details>
+<summary><b>a simple http server</b></summary>
+
+![alt text](readme-images/image.webp)
+
+</details>
+
+<details>
+<summary><b>a simple MADPCM player</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>invoke --quiet --script audio.ffi
+Loading MADPCM file...
+Decoding to PCM...
+Applying Inverse Mid/Side Transform (M/S -> L/R)...
+Format: 48000 Hz, 2 Channels, 11414528 Samples
+Playing...
+sleeping for 238802 ms
+goodbye!
+```
 
 </details>
 

@@ -1,9 +1,10 @@
 @echo off
-set CFLAGS=/Ox /GL /Gw /Ob3 /Qpar /fp:fast /arch:AVX2 /std:c++latest /nologo
+if not exist "obj" mkdir "obj"
+set CFLAGS=/Ox /GL /Gw /Ob3 /Qpar /Fo"obj\\" /fp:fast /arch:AVX2 /std:c++latest /nologo
 
-cl %CFLAGS% /c /EHa caller.cpp || pause && exit /b
-cl %CFLAGS% /c lexer.cpp || pause && exit /b
-cl %CFLAGS% /c parser.cpp || pause && exit /b
-ml64 /c /nologo helper.asm || pause && exit /b
+cl %CFLAGS% /c /EHsc code\caller.cpp || pause && exit /b
+cl %CFLAGS% /c code\lexer.cpp || pause && exit /b
+cl %CFLAGS% /c /EHa code\parser.cpp || pause && exit /b
+ml64 /c /Fo"obj\\" /nologo code\helper.asm || pause && exit /b
 
-link caller.obj lexer.obj parser.obj helper.obj /LTCG /OPT:REF /OPT:ICF /nologo /out:invoke.exe || pause && exit /b
+link obj\caller.obj obj\lexer.obj obj\parser.obj obj\helper.obj /LTCG /OPT:REF /OPT:ICF /nologo /out:invoke.exe || pause && exit /b

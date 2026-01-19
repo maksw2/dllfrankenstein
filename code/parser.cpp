@@ -166,7 +166,7 @@ static Layout handle_struct(ParseContext* ctx, std::string member_name = "root")
 static Value parse_factor(ParseContext* ctx) {
     Token t = peek(ctx);
 
-    // 1. Handle Unary Minus (-5, -0.5)
+    // Handle Unary Minus (-5, -0.5)
     if (match(ctx, TokenType::TOK_MINUS)) {
         Value val = parse_factor(ctx);
         if (val.type == TypeKind::TYPE_F32 || val.type == TypeKind::TYPE_F64) {
@@ -179,14 +179,26 @@ static Value parse_factor(ParseContext* ctx) {
         return val;
     }
 
-    // 2. Handle Address-Of (&$var)
+    // Handle Bitwise NOT (~$var)
+    if (match(ctx, TokenType::TOK_TILDE)) {
+        Value val = parse_factor(ctx);
+        // Bitwise NOT is only valid on integers
+        if (val.type == TypeKind::TYPE_F32 || val.type == TypeKind::TYPE_F64) {
+            throw SyntaxError("Cannot apply bitwise NOT to floating point types", t.line);
+        }
+        val.value = ~val.value; 
+        val.type = TypeKind::TYPE_I64; // Ensure result is treated as integer
+        return val;
+    }
+
+    // Handle Address-Of (&$var)
     if (match(ctx, TokenType::TOK_AMP)) {
         Token var_t = consume(ctx, TokenType::TOK_VARIABLE, "Expected variable after &");
         uint64_t addr = var_get_addr(var_t.text);
         return { TypeKind::TYPE_PTR, addr }; // Returns pointer to the variable's value slot
     }
 
-    // 3. Dereference (*$var) -> Reads 64-bit value from address
+    // Dereference (*$var) -> Reads 64-bit value from address
     if (match(ctx, TokenType::TOK_STAR)) {
         Value addr = parse_factor(ctx); // Recurse to allow *($ptr + 8)
         if (addr.value == 0) throw SyntaxError("Null pointer dereference", t.line);
@@ -194,7 +206,7 @@ static Value parse_factor(ParseContext* ctx) {
         return { TypeKind::TYPE_U64, *(uint64_t*)addr.value };
     }
 
-    // 4. Directives as Values
+    // Directives as Values
     if (match(ctx, TokenType::TOK_SLASH)) {
         Token cmd = consume(ctx, TokenType::TOK_IDENTIFIER, "Expected command");
         
@@ -209,7 +221,7 @@ static Value parse_factor(ParseContext* ctx) {
         throw SyntaxError("Unexpected directive in expression: " + cmd.text, cmd.line);
     }
 
-    // 5. Type Casts (i32 0x..., wstr "...")
+    // Type Casts (i32 0x..., wstr "...")
     if (t.type == TokenType::TOK_IDENTIFIER) {
         TypeKind type = token_to_type(t.text);
         if (type != TypeKind::TYPE_VOID) { 
@@ -241,7 +253,7 @@ static Value parse_factor(ParseContext* ctx) {
         return val;
     }
 
-    // 6. Handle Strings (and concatenation)
+    // Handle Strings (and concatenation)
     if (match(ctx, TokenType::TOK_STRING)) {
         std::string full_str = t.text;
         // Check for adjacent strings ("A" "B")
@@ -263,8 +275,34 @@ static Value parse_factor(ParseContext* ctx) {
 
 // Helper to cast "bits" to float, do op, and cast back
 static Value math_op(Value left, Value right, char op) {
+    // Handle Bitwise Shifts (Integers only)
+    // We use 'L' for Left Shift (<<) and 'R' for Right Shift (>>)
+    if (op == 'L' || op == 'R'|| op == '^'|| op == '&' || op == '|' || op == '~') {
+        // If either operand is a float, this is usually an error or undefined.
+        // We will strictly cast to int64 for the operation.
+        if (left.type == TypeKind::TYPE_F32 || left.type == TypeKind::TYPE_F64 ||
+            right.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F64) {
+            // Optional: Print an error here, e.g., "Cannot bit-shift floats"
+            return { TypeKind::TYPE_I64, 0 }; 
+        }
+
+        uint64_t l_val = left.value;
+        uint64_t r_val = right.value;
+        uint64_t res = 0;
+
+        if (op == 'L') res = l_val << r_val;
+        if (op == 'R') res = l_val >> r_val;
+        if (op == '^') res = l_val ^ r_val;
+        if (op == '&') res = l_val & r_val;
+        if (op == '|') res = l_val | r_val;
+        if (op == '~') res = ~l_val;
+        
+        return { TypeKind::TYPE_I64, res };
+    }
+
+    // Existing Float/Math Logic
     bool res_float = left.type == TypeKind::TYPE_F32 || left.type == TypeKind::TYPE_F64
-     || right.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F64;
+      || right.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F64;
 
     if (res_float) {
         float l_val = left.type == TypeKind::TYPE_F32 || left.type == TypeKind::TYPE_F64 ? *(float*)&left.value : (float)(int64_t)left.value;
@@ -312,7 +350,7 @@ static Value parse_term(ParseContext* ctx) {
     return left;
 }
 
-static Value parse_expression(ParseContext* ctx) {
+static Value parse_additive(ParseContext* ctx) {
     Value left = parse_term(ctx);
     while (peek(ctx).type == TokenType::TOK_PLUS || peek(ctx).type == TokenType::TOK_MINUS) {
         enum TokenType op = advance(ctx).type;
@@ -320,6 +358,56 @@ static Value parse_expression(ParseContext* ctx) {
         left = math_op(left, right, (op == TokenType::TOK_PLUS) ? '+' : '-');
     }
     return left;
+}
+
+static Value parse_shift(ParseContext* ctx) {
+    // Parse the higher precedence (Additive) logic first
+    Value left = parse_additive(ctx);
+
+    // Look for Shift operators
+    while (peek(ctx).type == TokenType::TOK_LSHIFT || peek(ctx).type == TokenType::TOK_RSHIFT) {
+        Token op = advance(ctx);
+        Value right = parse_additive(ctx);
+        
+        // We pass 'L' or 'R' to match the updated logic in math_op
+        char op_code = (op.type == TokenType::TOK_LSHIFT) ? 'L' : 'R';
+        left = math_op(left, right, op_code);
+    }
+    return left;
+}
+
+static Value parse_bitwise_and(ParseContext* ctx) {
+    Value left = parse_shift(ctx); // Next highest is shift
+    while (peek(ctx).type == TokenType::TOK_AMP) {
+        advance(ctx);
+        Value right = parse_shift(ctx);
+        left = math_op(left, right, '&');
+    }
+    return left;
+}
+
+static Value parse_xor(ParseContext* ctx) {
+    Value left = parse_bitwise_and(ctx);
+    while (peek(ctx).type == TokenType::TOK_XOR) {
+        advance(ctx); // consume '^'
+        Value right = parse_bitwise_and(ctx);
+        left = math_op(left, right, '^');
+    }
+    return left;
+}
+
+static Value parse_bitwise_or(ParseContext* ctx) {
+    Value left = parse_xor(ctx); // Next highest is XOR
+    while (peek(ctx).type == TokenType::TOK_PIPE) {
+        advance(ctx);
+        Value right = parse_xor(ctx);
+        left = math_op(left, right, '|');
+    }
+    return left;
+}
+
+static Value parse_expression(ParseContext* ctx) {
+    return parse_bitwise_or(ctx);
 }
 
 // --- Handler Implementations ---
@@ -368,7 +456,7 @@ static void handle_set(ParseContext* ctx) {
     
     char buf[128];
     format_result(val, type, buf, sizeof(buf));
-    printf("Value at 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
+    print("Value at 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
 }
 
 static void handle_get(ParseContext* ctx) {
@@ -397,7 +485,7 @@ static void handle_get(ParseContext* ctx) {
 
     char buf[128];
     format_result(val, type, buf, sizeof(buf));
-    printf("Read 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
+    print("Read 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
 }
 
 static void handle_hex(ParseContext* ctx) {
@@ -455,7 +543,7 @@ static uint64_t handle_address(ParseContext* ctx) {
         } else {
             func_ptr = (void*)GetProcAddress(h, func_name.c_str());
         }
-        if (func_ptr) printf("%s!%s = 0x%llX\n", dll_name.c_str(), func_name.c_str(), (uint64_t)func_ptr);
+        if (func_ptr) print("%s!%s = 0x%llX\n", dll_name.c_str(), func_name.c_str(), (uint64_t)func_ptr);
         else throw std::runtime_error("Function not found\n");
     } else {
         throw std::runtime_error("DLL not found\n");
@@ -546,6 +634,47 @@ static Layout handle_struct(ParseContext* ctx, std::string member_name) {
     return { (uint64_t)total_size, max_align };
 }
 
+static void handle_assert_command(ParseContext* ctx, std::string cmd) {
+    // /assert[v/c] <expr> <cond>
+    Value val = parse_expression(ctx);
+    Token cond_tok = consume(ctx, TokenType::TOK_IDENTIFIER, "Expected condition (zero, nonzero, etc)");
+    
+    bool pass = false;
+    if (cond_tok.text == "zero")           pass = (val.value == 0);
+    else if (cond_tok.text == "nonzero")    pass = (val.value != 0);
+    else if (cond_tok.text == "negative")   pass = ((int64_t)val.value < 0);
+    else if (cond_tok.text == "nonnegative") pass = ((int64_t)val.value >= 0);
+    else if (cond_tok.text == "positive")    pass = ((int64_t)val.value > 0);
+    else throw SyntaxError("Unknown condition: " + cond_tok.text, cond_tok.line);
+
+    if (cmd == "assertv") {
+        // Sets $assert_res to 1 (pass) or 0 (fail)
+        var_set("$assert_res", { TypeKind::TYPE_U64, (uint64_t)(pass ? 1 : 0) });
+    } 
+    else if (!pass) {
+        if (cmd == "assertc") {
+            // Throws internal signal to trigger loop 'continue'
+            throw std::runtime_error("SIGNAL_CONTINUE");
+        } else {
+            g_assert_failed = true;
+            print("Assertion failed at line %d\n", cond_tok.line);
+        }
+    }
+}
+
+static uint64_t seh_call_wrapper(void* func_ptr, uint64_t* raw_args, int arg_count, uint32_t float_mask, bool* crashed, unsigned long* code) {
+    uint64_t result = 0;
+    *crashed = false;
+    __try {
+        result = call_dynamic_function(func_ptr, raw_args, arg_count, float_mask);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        *crashed = true;
+    }
+    return result;
+}
+
 // --- DLL Call Execution ---
 
 static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
@@ -609,13 +738,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
     bool crashed = false;
     unsigned long code = 0;
 
-    __try {
-        result = call_dynamic_function(func_ptr, raw_args, spec->arg_count, float_mask);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        code = GetExceptionCode();
-        crashed = true;
-    }
+    result = seh_call_wrapper(func_ptr, raw_args, spec->arg_count, float_mask, &crashed, &code);
 
     if (crashed) {
         printf("\n[!!!] CRASHED [!!!]\n");
@@ -636,7 +759,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
     if (spec->print_result && spec->return_type != TypeKind::TYPE_VOID) {
         char buf[128];
         format_result(result, spec->return_type, buf, sizeof(buf));
-        printf("Result: %s\n", buf);
+        print("Result: %s\n", buf);
     }
 
     g_assert_failed = false;
@@ -646,13 +769,18 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
         if (spec->assert_type == AssertType::ASSERT_NOT_ZERO && result == 0) fail = true;
         if (spec->assert_type == AssertType::ASSERT_NEGATIVE && (int64_t)result >= 0) fail = true;
         if (spec->assert_type == AssertType::ASSERT_NON_NEGATIVE && (int64_t)result < 0) fail = true;
+        if (spec->assert_type == AssertType::ASSERT_POSITIVE && (int64_t)result <= 0) fail = true;
         
-        if (fail && spec->fatal) {
-            g_assert_failed = true;
-            if (!g_in_a_loop)
-                printf("Assertion Failed for result: %llu\n", result);
-        } else if (!spec->fatal) {
-            return !fail;
+        if (fail) {
+            if (spec->fatal) {
+                g_assert_failed = true;
+                if (!g_in_a_loop) printf("Assertion Failed: %llu\n", result);
+            } else if (spec->continue_on_fail) {
+                throw std::runtime_error("SIGNAL_CONTINUE"); // Trigger the block skip
+            } else {
+                var_set("$assert_res", { TypeKind::TYPE_U64, 0 });
+                return result; // Standard assertv (non-fatal) returns 0
+            }
         }
     }
 
@@ -666,9 +794,63 @@ static void parse_statement(ParseContext* ctx);
 static void run_block(std::vector<Token>& tokens) {
     ParseContext sub = { tokens, 0 };
     while(sub.pos < sub.tokens.size()) {
-        parse_statement(&sub);
-        if (g_assert_failed) break; // Break loop on assert fail
+        try {
+            parse_statement(&sub);
+            if (g_assert_failed) break;
+        } catch (const std::runtime_error& e) {
+            // If it's our continue signal, simply stop the current block 
+            // and return to the loop caller
+            if (std::string(e.what()) == "SIGNAL_CONTINUE") break;
+            throw; // Re-throw actual errors
+        }
     }
+}
+
+static Value perform_cast(Value val, TypeKind target) {
+    if (val.type == target) return val;
+
+    // Convert current value to a "working" double or int64
+    double intermediate_f;
+    int64_t intermediate_i;
+    bool is_input_float = (val.type == TypeKind::TYPE_F32 || val.type == TypeKind::TYPE_F64);
+
+    if (val.type == TypeKind::TYPE_F32) {
+        float f; memcpy(&f, &val.value, 4);
+        intermediate_f = (double)f;
+        intermediate_i = (int64_t)f;
+    } else if (val.type == TypeKind::TYPE_F64) {
+        double d; memcpy(&d, &val.value, 8);
+        intermediate_f = d;
+        intermediate_i = (int64_t)d;
+    } else {
+        intermediate_i = (int64_t)val.value;
+        intermediate_f = (double)intermediate_i;
+    }
+
+    Value result = { target, 0 };
+    
+    // Cast to Target
+    switch (target) {
+        case TypeKind::TYPE_F32: {
+            float f = (float)intermediate_f;
+            memcpy(&result.value, &f, 4);
+            break;
+        }
+        case TypeKind::TYPE_F64: {
+            double d = intermediate_f;
+            memcpy(&result.value, &d, 8);
+            break;
+        }
+        case TypeKind::TYPE_I8:   result.value = (int8_t)intermediate_i; break;
+        case TypeKind::TYPE_I32:  result.value = (int32_t)intermediate_i; break;
+        case TypeKind::TYPE_I64:  result.value = (int64_t)intermediate_i; break;
+        case TypeKind::TYPE_U32:  result.value = (uint32_t)intermediate_i; break;
+        case TypeKind::TYPE_U64:  result.value = (uint64_t)intermediate_i; break;
+        case TypeKind::TYPE_PTR:  result.value = (uint64_t)intermediate_i; break;
+        default: result = val; break; // Fallback
+    }
+
+    return result;
 }
 
 static void parse_statement(ParseContext* ctx) {
@@ -686,6 +868,9 @@ static void parse_statement(ParseContext* ctx) {
         else if (cmd.text == "hex") handle_hex(ctx);
         else if (cmd.text == "address") handle_address(ctx);
         else if (cmd.text == "struct") handle_struct(ctx);
+        else if (cmd.text == "assert")  handle_assert_command(ctx, cmd.text);
+        else if (cmd.text == "assertv") handle_assert_command(ctx, cmd.text);
+        else if (cmd.text == "assertc") handle_assert_command(ctx, cmd.text);
         else if (cmd.text == "loaddll") {
              std::string path = consume(ctx, TokenType::TOK_IDENTIFIER, "Path").text; 
              HMODULE h = LoadLibraryA(path.c_str());
@@ -693,7 +878,7 @@ static void parse_statement(ParseContext* ctx) {
                  g_registry[g_registry_count].handle = h;
                  strcpy(g_registry[g_registry_count].path, path.c_str());
                  g_focus_idx = g_registry_count++;
-                 printf("Loaded %s\n", path.c_str());
+                 print("Loaded %s\n", path.c_str());
              }
         }
         else if (cmd.text == "dlls") {
@@ -718,7 +903,7 @@ static void parse_statement(ParseContext* ctx) {
 
             g_in_a_loop = true;
             for(uint64_t i=0; i<count; i++) {
-                var_set("i", { TypeKind::TYPE_U64, i });
+                var_set("$i", { TypeKind::TYPE_U64, i });
                 run_block(body);
                 if (g_assert_failed) {
                     g_assert_failed = false;
@@ -743,7 +928,7 @@ static void parse_statement(ParseContext* ctx) {
             g_in_a_loop = true;
             uint64_t i=0;
             while(true) {
-                var_set("i", { TypeKind::TYPE_U64, i++ });
+                var_set("$i", { TypeKind::TYPE_U64, i++ });
                 run_block(body);
                 if (g_assert_failed) {
                     g_assert_failed = false;
@@ -856,10 +1041,17 @@ static void parse_statement(ParseContext* ctx) {
             else if (f == "--assert=nonzero") { spec.assert_type = AssertType::ASSERT_NOT_ZERO; spec.fatal = true; }
             else if (f == "--assert=negative") { spec.assert_type = AssertType::ASSERT_NEGATIVE; spec.fatal = true; }
             else if (f == "--assert=nonnegative") { spec.assert_type = AssertType::ASSERT_NON_NEGATIVE; spec.fatal = true; }
+            else if (f == "--assert=positive") { spec.assert_type = AssertType::ASSERT_POSITIVE; spec.fatal = true; }
             else if (f == "--assertv=zero") spec.assert_type = AssertType::ASSERT_ZERO;
             else if (f == "--assertv=nonzero") spec.assert_type = AssertType::ASSERT_NOT_ZERO;
             else if (f == "--assertv=negative") spec.assert_type = AssertType::ASSERT_NEGATIVE;
             else if (f == "--assertv=nonnegative") spec.assert_type = AssertType::ASSERT_NON_NEGATIVE;
+            else if (f == "--assertv=positive") spec.assert_type = AssertType::ASSERT_POSITIVE;
+            else if (f == "--assertc=zero") { spec.assert_type = AssertType::ASSERT_ZERO; spec.continue_on_fail = true; }
+            else if (f == "--assertc=nonzero") { spec.assert_type = AssertType::ASSERT_NOT_ZERO; spec.continue_on_fail = true; }
+            else if (f == "--assertc=negative") { spec.assert_type = AssertType::ASSERT_NEGATIVE; spec.continue_on_fail = true; }
+            else if (f == "--assertc=nonnegative") { spec.assert_type = AssertType::ASSERT_NON_NEGATIVE; spec.continue_on_fail = true; }
+            else if (f == "--assertc=positive") { spec.assert_type = AssertType::ASSERT_POSITIVE; spec.continue_on_fail = true; }
         }
         
         uint64_t res = execute_dll_call(&spec, line_of_call);
@@ -867,14 +1059,31 @@ static void parse_statement(ParseContext* ctx) {
         if (!assign_to.empty()) var_set(assign_to, { spec.return_type, res });
     
     } else {
-        // Must be math
+        // Must be math or a casted assignment
+        TypeKind cast_type = TypeKind::TYPE_VOID;
+        
+        // Check if the user provided an explicit type cast: $var = i32 5.5
+        if (peek(ctx).type == TokenType::TOK_IDENTIFIER) {
+            TypeKind check = token_to_type(peek(ctx).text);
+            if (check != TypeKind::TYPE_VOID) {
+                cast_type = check;
+                advance(ctx); // consume the type identifier (e.g., "i32")
+            }
+        }
+
         Value res = parse_expression(ctx);
-        if (!assign_to.empty()) var_set(assign_to, res);
-        else {
-            // Naked expression, just print
+
+        // Perform the cast if a type was specified
+        if (cast_type != TypeKind::TYPE_VOID) {
+            res = perform_cast(res, cast_type);
+        }
+
+        if (!assign_to.empty()) {
+            var_set(assign_to, res);
+        } else {
             char buf[64];
             format_result(res.value, res.type, buf, sizeof(buf));
-            printf("= %s\n", buf);
+            print("= %s\n", buf);
         }
     }
 }

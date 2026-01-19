@@ -1,0 +1,112 @@
+; audio.ffi
+
+; Constants
+$WAVE_FORMAT_PCM = i64 1
+$CALLBACK_NULL = 0
+$LOAD_FROM_FILE = i32 0
+
+; Wave Structs
+$WAVEFORMATEX_size = /struct { $wFormatTag_off = u16 wFormatTag, $nChannels_off = u16 nChannels,
+    $nSamplesPerSec_off = u32 nSamplesPerSec, $nAvgBytesPerSec_off = u32 nAvgBytesPerSec,
+    $nBlockAlign_off = u16 nBlockAlign, $wBitsPerSample_off = u16 wBitsPerSample, $cbSize_off = u16 cbSize }
+$WAVEHDR_size = /struct { $lpData_off = voidptr lpData, $dwBufferLength_off = u32 dwBufferLength,
+    $dwBytesRecorded_off = u32 dwBytesRecorded, $dwUser_off = voidptr dwUser, $dwFlags_off = u32 dwFlags,
+    $dwLoops_off = u32 dwLoops, $lpNext_off = voidptr lpNext, voidptr reserved }
+
+; MADPCM Structs
+$AudioBuffer_size = /struct { 
+    $floatL_off = voidptr floatL, 
+    $floatR_off = voidptr floatR, 
+    $numSamples_off = i32 numSamples, 
+    $paddedSamples_off = i32 paddedSamples, 
+    $numBlocks_off = i32 numBlocks, 
+    $channels_off = i32 channels, 
+    $sampleRate_off = i32 sampleRate 
+}
+
+; We pass the address of msvcrt.printf to the DLL
+$madpcm_printf = /address msvcrt.dll printf
+
+msvcrt.dll i32 printf(str "Loading MADPCM file...\n")
+madpcm.dll void setLogging(voidptr $madpcm_printf)
+
+$inputFile = str "Egyptischer_Marsch_ad.wav"
+
+; Load Compressed
+$compressed = madpcm.dll voidptr loadMADPCMFile(str $inputFile, i32 $LOAD_FROM_FILE)
+
+msvcrt.dll i32 printf(str "Decoding to PCM...\n")
+
+; Decode to AudioBuffer
+$audio = madpcm.dll voidptr decodeBuffer(voidptr $compressed)
+
+; Free Compressed
+madpcm.dll void freeCompressedAudio(voidptr $compressed)
+
+; Get Raw 16-bit PCM Pointer
+$pcmData = madpcm.dll voidptr getRawPCM(voidptr $audio)
+
+; Dereference struct fields to configure WaveOut
+$ptr_ns = voidptr $audio + $numSamples_off
+$numSamples = i32 *$ptr_ns
+
+$ptr_sr = voidptr $audio + $sampleRate_off
+$sampleRate = i32 *$ptr_sr
+
+$ptr_ch = voidptr $audio + $channels_off
+$channels = i32 *$ptr_ch
+
+msvcrt.dll i32 printf(str "Format: %d Hz, %d Channels, %d Samples\n", i32 $sampleRate, i32 $channels, i32 $numSamples)
+
+; Calculate Buffer Size in Bytes: Samples * Channels * 2 (16-bit)
+$bufferSize = i32 $numSamples * $channels
+$bufferSize = i32 $bufferSize * 2
+
+$wfx = msvcrt.dll voidptr malloc(u64 $WAVEFORMATEX_size) --assert=nonzero
+
+; BlockAlign = Channels * 2
+$blockAlign = i32 $channels * 2
+; AvgBytes = Rate * BlockAlign
+$avgBytes = i32 $sampleRate * $blockAlign
+
+/set $wfx + $wFormatTag_off u16 $WAVE_FORMAT_PCM
+/set $wfx + $nChannels_off u16 $channels
+/set $wfx + $nSamplesPerSec_off u32 $sampleRate
+/set $wfx + $wBitsPerSample_off u16 16
+/set $wfx + $nBlockAlign_off u16 $blockAlign
+/set $wfx + $nAvgBytesPerSec_off u32 $avgBytes
+/set $wfx + $cbSize_off u16 0
+
+/loaddll winmm.dll
+
+$hWaveOut = voidptr 0
+i32 waveOutOpen(voidptr &$hWaveOut, u32 -1, voidptr $wfx, voidptr 0, voidptr 0, u32 $CALLBACK_NULL)
+
+$header = msvcrt.dll voidptr malloc(u64 $WAVEHDR_size) --assert=nonzero
+/set $header + $lpData_off voidptr $pcmData
+/set $header + $dwBufferLength_off u32 $bufferSize
+/set $header + $dwFlags_off u32 0
+/set $header + $dwLoops_off u32 0
+
+i32 waveOutPrepareHeader(voidptr $hWaveOut, voidptr $header, u32 $WAVEHDR_size)
+i32 waveOutWrite(voidptr $hWaveOut, voidptr $header, u32 $WAVEHDR_size)
+
+msvcrt.dll i32 printf(str "Playing...\n")
+
+; Calculate duration in ms + padding
+$calc = i64 $numSamples
+$calc = i64 $calc * 1000
+$rate64 = i64 $sampleRate
+$calc = i64 $calc / $rate64
+$calc = i64 $calc + 1000
+$durationMs = i32 $calc
+msvcrt.dll i32 printf(str "sleeping for %d ms\n", i32 $durationMs)
+
+kernel32.dll void Sleep(i32 $durationMs)
+msvcrt.dll i32 printf(str "goodbye!\n")
+i32 waveOutReset(voidptr $hWaveOut)
+i32 waveOutUnprepareHeader(voidptr $hWaveOut, voidptr $header, u32 $WAVEHDR_size)
+i32 waveOutClose(voidptr $hWaveOut)
+msvcrt.dll void free(voidptr $wfx)
+msvcrt.dll void free(voidptr $header)
+/quit

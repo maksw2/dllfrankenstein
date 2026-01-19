@@ -13,20 +13,20 @@ std::vector<Token> tokenize(const char* src) {
     const char* p = src;
 
     while (*p) {
-        // 1. Skip Whitespace
+        // Skip Whitespace
         if (isspace(*p)) {
             if (*p == '\n') line++;
             p++;
             continue;
         }
 
-        // 2. Skip Comments
+        // Skip Comments
         if (*p == ';' || (p[0] == '/' && p[1] == '/')) {
             while (*p && *p != '\n') p++;
             continue; 
         }
 
-        // 3. Flags (e.g. --print-result, --assert=zero)
+        // Flags (e.g. --print-result, --assert=zero)
         // We catch this BEFORE subtraction (-) because -- is distinct.
         if (p[0] == '-' && p[1] == '-') {
             const char* start = p;
@@ -38,7 +38,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 4. Variables ($var)
+        // Variables ($var)
         // Merging $ and name makes parsing much safer
         if (*p == '$') {
             const char* start = p;
@@ -48,7 +48,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 5. Numbers (Hex, Int, Float)
+        // Numbers (Hex, Int, Float)
         // Check for digit OR .digit (like .5f)
         if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
             const char* start = p;
@@ -86,7 +86,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 6. Strings
+        // Strings
         if (*p == '"') {
             p++;
             std::string str_content;
@@ -110,7 +110,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 7. Identifiers
+        // Identifiers
         if (isalpha(*p) || *p == '_') {
             const char* start = p;
             while (is_ident_char(*p)) p++;
@@ -118,7 +118,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 7b. Ordinals
+        // Ordinals
         if (*p == '#') {
             const char* start = p;
             p++; // Skip #
@@ -128,7 +128,7 @@ std::vector<Token> tokenize(const char* src) {
             continue;
         }
 
-        // 8. Symbols
+        // Symbols
         TokenType type = TokenType::TOK_EOF;
         switch (*p) {
             case '(': type = TokenType::TOK_LPAREN; break;
@@ -138,11 +138,34 @@ std::vector<Token> tokenize(const char* src) {
             case ',': type = TokenType::TOK_COMMA; break;
             case '=': type = TokenType::TOK_EQUALS; break;
             case '&': type = TokenType::TOK_AMP; break;
-            // $ handled above
+            
             case '+': type = TokenType::TOK_PLUS; break;
-            case '-': type = TokenType::TOK_MINUS; break; // Single minus
+            case '-': type = TokenType::TOK_MINUS; break;
             case '*': type = TokenType::TOK_STAR; break;
             case '/': type = TokenType::TOK_SLASH; break;
+            case '^': type = TokenType::TOK_XOR; break;
+            case '|': type = TokenType::TOK_PIPE; break;
+            case '~': type = TokenType::TOK_TILDE; break;
+
+            // Handle < and <<
+            case '<': 
+                if (*(p + 1) == '<') {
+                    type = TokenType::TOK_LSHIFT;
+                    p++; // Consume the second '<' so the main loop doesn't read it again
+                } else {
+                    type = TokenType::TOK_LT; 
+                }
+                break;
+
+            // Handle > and >>
+            case '>': 
+                if (*(p + 1) == '>') {
+                    type = TokenType::TOK_RSHIFT;
+                    p++; // Consume the second '>'
+                } else {
+                    type = TokenType::TOK_GT; 
+                }
+                break;
         }
 
         if (type != TokenType::TOK_EOF) {
