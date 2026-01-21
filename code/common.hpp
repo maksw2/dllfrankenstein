@@ -49,9 +49,6 @@ struct CallSpec {
     int print_result;
 };
 
-extern bool g_assert_failed;
-extern bool g_in_a_loop;
-
 extern bool var_get(const std::string& name, Value* out_val);
 extern void var_set(const std::string& name, Value val);
 extern uint64_t var_get_addr(const std::string& name);

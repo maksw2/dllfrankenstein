@@ -21,7 +21,15 @@ static std::unordered_map<std::string, wchar_t*> g_wstr_cache;
 static RegisteredDLL g_registry[32];
 static int g_registry_count = 0;
 static int g_focus_idx = -1;
-static bool g_assert_failed = false;
+
+bool g_assert_failed = false;
+int g_loop_depth = 0;
+
+// Helper to manage loop depth safely (RAII)
+struct LoopScope {
+    LoopScope() { g_loop_depth++; }
+    ~LoopScope() { g_loop_depth--; }
+};
 
 // Extern the assembly bridge
 extern "C" uint64_t call_dynamic_function(void* func_ptr, uint64_t* args, int arg_count, uint32_t float_mask);
@@ -160,6 +168,7 @@ struct Layout {
 
 static Value parse_expression(ParseContext* ctx);
 static uint64_t handle_address(ParseContext* ctx);
+static Value handle_get(ParseContext* ctx);
 static Layout handle_struct(ParseContext* ctx, std::string member_name = "root");
 
 // this fucking bitch
@@ -215,7 +224,11 @@ static Value parse_factor(ParseContext* ctx) {
             return { TypeKind::TYPE_PTR, handle_address(ctx) };
         }
         else if (cmd.text == "struct") {
-             return { TypeKind::TYPE_U64, handle_struct(ctx).size };
+            return { TypeKind::TYPE_U64, handle_struct(ctx).size };
+        }
+        else if (cmd.text == "get") {
+            // /get <addr> <type>
+            return handle_get(ctx);
         }
         
         throw SyntaxError("Unexpected directive in expression: " + cmd.text, cmd.line);
@@ -490,7 +503,7 @@ static void handle_set(ParseContext* ctx) {
     print("Value at 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
 }
 
-static void handle_get(ParseContext* ctx) {
+static Value handle_get(ParseContext* ctx) {
     // /get <addr> <type>
     uint64_t addr = parse_expression(ctx).value;
     Token type_tok = consume(ctx, TokenType::TOK_IDENTIFIER, "Expected type");
@@ -517,6 +530,8 @@ static void handle_get(ParseContext* ctx) {
     char buf[128];
     format_result(val, type, buf, sizeof(buf));
     print("Read 0x%llX (%s): %s\n", addr, type_tok.text.c_str(), buf);
+
+    return { type, val };
 }
 
 static void handle_hex(ParseContext* ctx) {
@@ -577,7 +592,7 @@ static uint64_t handle_address(ParseContext* ctx) {
         if (func_ptr) print("%s!%s = 0x%llX\n", dll_name.c_str(), func_name.c_str(), (uint64_t)func_ptr);
         else throw std::runtime_error("Function not found\n");
     } else {
-        throw std::runtime_error("DLL not found\n");
+        throw SyntaxError("DLL not found: " + dll_name + "\n", dll_tok.line);
     }
     return (uint64_t)func_ptr;
 }
@@ -688,7 +703,8 @@ static void handle_assert_command(ParseContext* ctx, std::string cmd) {
             throw std::runtime_error("SIGNAL_CONTINUE");
         } else {
             g_assert_failed = true;
-            print("Assertion failed at line %d\n", cond_tok.line);
+            if (!g_loop_depth)
+                print("Assertion failed at line %d\n", cond_tok.line);
         }
     }
 }
@@ -805,7 +821,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
         if (fail) {
             if (spec->fatal) {
                 g_assert_failed = true;
-                if (!g_in_a_loop) printf("Assertion Failed: %llu\n", result);
+                if (!g_loop_depth) printf("Assertion Failed: %llu\n", result);
             } else if (spec->continue_on_fail) {
                 throw std::runtime_error("SIGNAL_CONTINUE"); // Trigger the block skip
             } else {
@@ -903,17 +919,19 @@ static void parse_statement(ParseContext* ctx) {
         else if (cmd.text == "assertv") handle_assert_command(ctx, cmd.text);
         else if (cmd.text == "assertc") handle_assert_command(ctx, cmd.text);
         else if (cmd.text == "loaddll") {
-             std::string path = consume(ctx, TokenType::TOK_IDENTIFIER, "Path").text; 
-             HMODULE h = LoadLibraryA(path.c_str());
-             if(h) {
-                 g_registry[g_registry_count].handle = h;
-                 strcpy(g_registry[g_registry_count].path, path.c_str());
-                 g_focus_idx = g_registry_count++;
-                 print("Loaded %s\n", path.c_str());
-             }
+            std::string path = consume(ctx, TokenType::TOK_IDENTIFIER, "Path").text; 
+            HMODULE h = LoadLibraryA(path.c_str());
+            if (h) {
+                g_registry[g_registry_count].handle = h;
+                strcpy(g_registry[g_registry_count].path, path.c_str());
+                g_focus_idx = g_registry_count++;
+                print("Loaded %s\n", path.c_str());
+            } else {
+                throw std::runtime_error("Failed to load DLL\n");
+            }
         }
         else if (cmd.text == "dlls") {
-             for(int i=0; i<g_registry_count; i++) 
+            for(int i=0; i<g_registry_count; i++) 
                 printf("%d: %s\n", i, g_registry[i].path);
         }
         else if (cmd.text == "quit") exit(0);
@@ -932,8 +950,8 @@ static void parse_statement(ParseContext* ctx) {
                 if(depth > 0) body.push_back(t);
             }
 
-            g_in_a_loop = true;
-            for(uint64_t i=0; i<count; i++) {
+            LoopScope scope;
+            for (uint64_t i = 0; i < count; i++) {
                 var_set("$i", { TypeKind::TYPE_U64, i });
                 run_block(body);
                 if (g_assert_failed) {
@@ -941,7 +959,6 @@ static void parse_statement(ParseContext* ctx) {
                     break;
                 }
             }
-            g_in_a_loop = false;
         }
         else if (cmd.text == "repeat") {
             // /repeat { ... }
@@ -956,8 +973,8 @@ static void parse_statement(ParseContext* ctx) {
                 if(depth > 0) body.push_back(t);
             }
 
-            g_in_a_loop = true;
-            uint64_t i=0;
+            LoopScope scope;
+            uint64_t i = 0;
             while(true) {
                 var_set("$i", { TypeKind::TYPE_U64, i++ });
                 run_block(body);
@@ -966,7 +983,6 @@ static void parse_statement(ParseContext* ctx) {
                     break;
                 }
             }
-            g_in_a_loop = false;
         }
         return;
     }

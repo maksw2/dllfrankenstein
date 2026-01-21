@@ -67,6 +67,7 @@ Variables have no scopes and should not be modified by any callee, for that use 
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
     Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
+    you can have complex inline expressions like '$file_exists_bool = i64 (($or_i >> 63) | -($or_i >> 63)) & 1'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
     str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
@@ -244,6 +245,25 @@ Reason: Privileged Instruction
 </details>
 
 <details>
+<summary><b>a simple MADPCM player</b></summary>
+
+```
+C:\Users\Administrator\Documents\dllfrankenstein>invoke --quiet --script audio.ffi
+Loading MADPCM file...
+Decoding to PCM...
+Applying Inverse Mid/Side Transform (M/S -> L/R)...
+Format: 48000 Hz, 2 Channels, 11414528 Samples
+Playing...
+sleeping for 238802 ms
+goodbye!
+```
+
+</details>
+
+The following examples are intentionally hostile to the tool's design.
+They exist to show limits, not best practices.
+
+<details>
 <summary><b>a complex opengl 3.3 triangle</b></summary>
 
 ![alt text](readme-images/image-3.png)
@@ -265,25 +285,9 @@ Reason: Privileged Instruction
 </details>
 
 <details>
-<summary><b>a simple http server</b></summary>
+<summary><b>an http server</b></summary>
 
 ![alt text](readme-images/image.webp)
-
-</details>
-
-<details>
-<summary><b>a simple MADPCM player</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>invoke --quiet --script audio.ffi
-Loading MADPCM file...
-Decoding to PCM...
-Applying Inverse Mid/Side Transform (M/S -> L/R)...
-Format: 48000 Hz, 2 Channels, 11414528 Samples
-Playing...
-sleeping for 238802 ms
-goodbye!
-```
 
 </details>
 
@@ -337,7 +341,7 @@ Q: What is the scale of pointer math?
 A: Bytes. Always.
 
 Q: Does it support variable arguments?  
-A: Variadic promotion does not exist. You need to know which type to cast to.
+A: Variadic argument promotion does not exist. You need to know which type to cast to.
 
 Q: Will you add fancy type parsing?  
 A: How about no.

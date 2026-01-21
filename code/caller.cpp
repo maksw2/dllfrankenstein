@@ -18,8 +18,6 @@ std::unordered_map<std::string, Value> vars;
 
 bool g_interactive = false;
 bool g_quiet = false;
-bool g_assert_failed = false;
-bool g_in_a_loop = false;
 
 const std::string help_string = R"(
 wilczurski's cool shit - ffi
@@ -45,7 +43,7 @@ Commands in interactive/script mode:
     /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets
     Both assume default packing and return the size. You can have structs in structs
     /dlls                               List loaded DLLs
-    /for     <count>    {<cmd>, ...}    Repeat {} <count> times
+    /for     <count>    {<cmd>, ...}    Repeat {} <count> times. If you're stubborn enough you can use it as an if
     /repeat             {<cmd>, ...}    Repeat {} until assert failure
     /quit                               Exit the program
 Variables have no scopes and should not be modified by any callee, for that use malloc
@@ -56,6 +54,7 @@ Variables have no scopes and should not be modified by any callee, for that use 
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
     Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
+    you can have complex inline expressions like '$file_exists_bool = i64 (($or_i >> 63) | -($or_i >> 63)) & 1'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
     str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
@@ -157,19 +156,19 @@ int main(int argc, char** argv) {
         } 
         else if (arg == "--script") {
             if (g_interactive) {
-                std::cerr << "Error: Cannot mix --interactive and --script\n";
+                std::println("Error: Cannot mix --interactive and --script\n");
                 return 1;
             }
             if (i + 1 < argc) {
                 script_file = argv[++i]; // Increment i to skip the filename
             } else {
-                std::cerr << "Error: --script requires a file path.\n";
+                std::println("Error: --script requires a file path.\n");
                 return 1;
             }
         } 
         else if (arg == "--interactive") {
             if (script_file != nullptr) {
-                std::cerr << "Error: Cannot mix --interactive and --script\n";
+                std::println("Error: Cannot mix --interactive and --script\n");
                 return 1;
             }
             g_interactive = true;
@@ -178,7 +177,7 @@ int main(int argc, char** argv) {
             g_quiet = true;
         } 
         else {
-            std::cerr << "Unknown argument: " << arg << "\n";
+            std::println("Unknown argument: {}", arg);
             return 1;
         }
     }
@@ -213,7 +212,7 @@ int main(int argc, char** argv) {
             } catch (const SyntaxError& e) {
                 // In REPL, line 1 is usually the immediate line, so strictly speaking
                 // printing line numbers might be redundant unless it's a multiline block.
-                if (e.line > 0) std::println("Error (Line {}): {}", e.line, e.what());
+                if (e.line > 1) std::println("Error (Line {}): {}", e.line, e.what());
                 else std::println("Error: {}", e.what());
                 buffer.clear();
                 incomplete = false;

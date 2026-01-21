@@ -43,6 +43,11 @@ void main() {
 
 ; Initialization
 
+; Load math functions for clamping
+/loaddll ucrtbase.dll
+$fminf = /address ucrtbase.dll fminf
+$fmaxf = /address ucrtbase.dll fmaxf
+
 /loaddll glfw3.dll
 i32 glfwInit()
 $w = voidptr glfwCreateWindow(i32 800, i32 600, str "Bounded Movement", voidptr 0, voidptr 0) --assert=nonzero
@@ -72,15 +77,13 @@ $glGetShaderiv        = voidptr glfwGetProcAddress(str "glGetShaderiv") --assert
 $glGetProgramiv       = voidptr glfwGetProcAddress(str "glGetProgramiv") --assert=nonzero
 $glGetShaderInfoLog   = voidptr glfwGetProcAddress(str "glGetShaderInfoLog") --assert=nonzero
 $glGetProgramInfoLog  = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --assert=nonzero
-
-; Load math functions for clamping
-/loaddll ucrtbase.dll
-$fminf = /address ucrtbase.dll fminf
-$fmaxf = /address ucrtbase.dll fmaxf
+$glDeleteProgram      = voidptr glfwGetProcAddress(str "glDeleteProgram") --assert=nonzero
+$glDeleteVertexArrays = voidptr glfwGetProcAddress(str "glDeleteVertexArrays") --assert=nonzero
+$glDeleteBuffers      = voidptr glfwGetProcAddress(str "glDeleteBuffers") --assert=nonzero
 
 ; Mesh Setup
 
-$vertices = voidptr malloc(u64 24) --assert=nonzero
+$vertices = msvcrt.dll voidptr malloc(u64 24) --assert=nonzero
 /set $vertices    f32 -0.1
 /set $vertices+4  f32 -0.1
 /set $vertices+8  f32  0.1
@@ -116,7 +119,7 @@ $fail = i32 1 - $status ; 1 = fail, 0 = success
     $logLen = i32 0
     void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
 
-    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
     void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, voidptr 0, voidptr $logBuf)
 
     msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
@@ -135,7 +138,7 @@ $fail = i32 1 - $status
     $logLen = i32 0
     void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
 
-    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
     void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, voidptr 0, voidptr $logBuf)
 
     msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
@@ -157,7 +160,7 @@ $fail = i32 1 - $status
     $logLen = i32 0
     void $glGetProgramiv(u32 $prog, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
 
-    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
     void $glGetProgramInfoLog(u32 $prog, i32 $logLen, voidptr 0, voidptr $logBuf)
 
     msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
@@ -166,8 +169,6 @@ $fail = i32 1 - $status
 }
 
 $uOffsetLoc = i32 $glGetUniformLocation(u32 $prog, str "uOffset")
-
-/loaddll glfw3.dll
 
 ; Timing
 $endTime = kernel32.dll u32 GetTickCount()
@@ -232,5 +233,11 @@ $posY = f32 0.0
 
 ; Cleanup
 msvcrt.dll i32 printf(str "goodbye!\n")
+
+void $glDeleteVertexArrays(i32 1, voidptr &$VAO)
+void $glDeleteBuffers(i32 1, voidptr &$VBO)
+void $glDeleteProgram(u32 $prog)
+glfw3.dll void glfwDestroyWindow(voidptr $w)
+glfw3.dll void glfwTerminate()
 msvcrt.dll void free(voidptr $vertices)
 /quit

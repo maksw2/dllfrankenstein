@@ -2,4 +2,10 @@
 invoke.exe
 invoke.pdb
 examples/test.dll
+examples/test.ilk
+examples/test.pdb
+test.exp
+test.lib
+test.obj
+vc140.pdb
 obj/
