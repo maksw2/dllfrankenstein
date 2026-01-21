@@ -78,7 +78,7 @@ load_register_args:
     ; Arg 0
     cmp edi, 1
     jl do_call
-    mov rcx, qword ptr [rsi] ; Always load GPR with the value
+    mov rcx, qword ptr [rsi]     ; Always load GPR with the value
     test r12d, 1
     jnz arg0_float
     jmp arg1

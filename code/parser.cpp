@@ -301,21 +301,52 @@ static Value math_op(Value left, Value right, char op) {
     }
 
     // Existing Float/Math Logic
-    bool res_float = left.type == TypeKind::TYPE_F32 || left.type == TypeKind::TYPE_F64
-      || right.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F64;
+    bool is_f64 = (left.type == TypeKind::TYPE_F64 || right.type == TypeKind::TYPE_F64);
+    bool is_float = is_f64 || (left.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F32);
 
-    if (res_float) {
-        float l_val = left.type == TypeKind::TYPE_F32 || left.type == TypeKind::TYPE_F64 ? *(float*)&left.value : (float)(int64_t)left.value;
-        float r_val = right.type == TypeKind::TYPE_F32 || right.type == TypeKind::TYPE_F64 ? *(float*)&right.value : (float)(int64_t)right.value;
-        float res = 0.0f;
+    if (is_float) {
+        double l_val = 0.0;
+        double r_val = 0.0;
 
+        // Extract Left
+        if (left.type == TypeKind::TYPE_F64) {
+            memcpy(&l_val, &left.value, 8);
+        } else if (left.type == TypeKind::TYPE_F32) {
+            float f; memcpy(&f, &left.value, 4);
+            l_val = (double)f;
+        } else {
+            l_val = (double)(int64_t)left.value;
+        }
+
+        // Extract Right
+        if (right.type == TypeKind::TYPE_F64) {
+            memcpy(&r_val, &right.value, 8);
+        } else if (right.type == TypeKind::TYPE_F32) {
+            float f; memcpy(&f, &right.value, 4);
+            r_val = (double)f;
+        } else {
+            r_val = (double)(int64_t)right.value;
+        }
+
+        double res = 0.0;
         switch(op) {
             case '+': res = l_val + r_val; break;
             case '-': res = l_val - r_val; break;
             case '*': res = l_val * r_val; break;
             case '/': res = (r_val != 0) ? (l_val / r_val) : 0; break;
         }
-        return { TypeKind::TYPE_F32, *(uint32_t*)&res };
+
+        // Return f64 if any input was f64, otherwise f32
+        if (is_f64) {
+            uint64_t bits;
+            memcpy(&bits, &res, 8);
+            return { TypeKind::TYPE_F64, bits };
+        } else {
+            float f_res = (float)res;
+            uint32_t bits;
+            memcpy(&bits, &f_res, 4);
+            return { TypeKind::TYPE_F32, (uint64_t)bits };
+        }
     } else {
         uint64_t res = 0;
         switch(op) {
@@ -685,7 +716,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
         func_ptr = (void*)strtoull(spec->func_name, NULL, 16);
     }
     else {
-        // 2. DLL Symbol Lookup
+        // DLL Symbol Lookup
         HMODULE h = NULL;
         if (strlen(spec->dll_path) > 0) {
             // Check registry first
@@ -702,7 +733,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
 
         if (!h) throw SyntaxError("DLL not loaded/specified for: " + std::string(spec->func_name), line_info);
 
-        // 3. Symbol Lookup (Name vs Ordinal)
+        // Symbol Lookup (Name vs Ordinal)
         if (spec->func_name[0] == '#') {
             char* end_ptr;
             unsigned long ord = strtoul(spec->func_name + 1, &end_ptr, 10);
@@ -722,7 +753,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
 
     if (!func_ptr) throw SyntaxError("Function not found: " + std::string(spec->func_name), line_info);
 
-    // 3. Prepare Args
+    // Prepare Args
     uint64_t raw_args[16];
     uint32_t float_mask = 0;
     for(int i=0; i<spec->arg_count; i++) {
@@ -733,7 +764,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
     if (spec->return_type == TypeKind::TYPE_F32 || spec->return_type == TypeKind::TYPE_F64)
          float_mask |= 0x80000000;
 
-    // 4. Call with SEH
+    // Call with SEH
     uint64_t result = 0;
     bool crashed = false;
     unsigned long code = 0;
@@ -755,7 +786,7 @@ static uint64_t execute_dll_call(CallSpec* spec, int line_info) {
         return 0;
     }
 
-    // 5. Flags & Assertions
+    // Flags & Assertions
     if (spec->print_result && spec->return_type != TypeKind::TYPE_VOID) {
         char buf[128];
         format_result(result, spec->return_type, buf, sizeof(buf));
@@ -999,7 +1030,7 @@ static void parse_statement(ParseContext* ctx) {
             
             // Handle &Var (Address pass)
             if (peek(ctx).type == TokenType::TOK_AMP) {
-                 spec.args[spec.arg_count].value = parse_expression(ctx).value;
+                spec.args[spec.arg_count].value = parse_expression(ctx).value;
             }
 
             // Handle Strings
@@ -1007,11 +1038,11 @@ static void parse_statement(ParseContext* ctx) {
                       spec.args[spec.arg_count].type == TypeKind::TYPE_WSTR) 
                      && peek(ctx).type == TokenType::TOK_STRING) {
                 
-                // 1. Concatenate adjacent string literals ("A" "B")
+                // Concatenate adjacent string literals ("A" "B")
                 std::string full = "";
                 while(peek(ctx).type == TokenType::TOK_STRING) full += advance(ctx).text;
-                
-                // 2. Convert based on type
+
+                // Convert based on type
                 if (spec.args[spec.arg_count].type == TypeKind::TYPE_WSTR) {
                     // Convert Narrow -> Wide
                     // CP_ACP uses system ANSI codepage (standard behavior for char*)
@@ -1025,7 +1056,11 @@ static void parse_statement(ParseContext* ctx) {
                 }
             } 
             else {
-                spec.args[spec.arg_count].value = parse_expression(ctx).value;
+                Value val = parse_expression(ctx);
+                if (val.type != spec.args[spec.arg_count].type) {
+                    val = perform_cast(val, spec.args[spec.arg_count].type);
+                }
+                spec.args[spec.arg_count].value = val.value;
             }
 
             spec.arg_count++;

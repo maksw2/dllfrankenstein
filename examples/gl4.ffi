@@ -167,11 +167,7 @@ $fail = i32 1 - $status
 
 $uOffsetLoc = i32 $glGetUniformLocation(u32 $prog, str "uOffset")
 
-; Using function pointers is a bit faster
-$glfwWindowShouldClose = /address glfw3.dll glfwWindowShouldClose
-$glfwGetKey = /address glfw3.dll glfwGetKey
-$glfwSwapBuffers = /address glfw3.dll glfwSwapBuffers
-$glfwPollEvents = /address glfw3.dll glfwPollEvents
+/loaddll glfw3.dll
 
 ; Timing
 $endTime = kernel32.dll u32 GetTickCount()
@@ -179,27 +175,25 @@ $elapsedTime = i64 $endTime - $startTime
 msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime) ; stupid microsoft
 
 ; State Variables
-$lastFrameTime = kernel32.dll u32 GetTickCount()
+$lastFrameTime = glfw3.dll f64 glfwGetTime()
 $unitsPerSecond = f32 1.5
 $posX = f32 0.0
 $posY = f32 0.0
 
 ; Main Loop
 /repeat { 
-    i32 $glfwWindowShouldClose(voidptr $w) --assert=zero,
-    $esc = i32 $glfwGetKey(voidptr $w, i32 256),
+    i32 glfwWindowShouldClose(voidptr $w) --assert=zero,
+    $esc = i32 glfwGetKey(voidptr $w, i32 256),
     /assert $esc zero,
 
-    $currentFrameTime = kernel32.dll u32 GetTickCount(),
-    $deltaTimeMS = i32 $currentFrameTime - $lastFrameTime,
-    $lastFrameTime = u32 $currentFrameTime,
-
-    $dt = f32 $deltaTimeMS,
-    $dt = f32 $dt / 1000.0,
+    $currentFrameTime = glfw3.dll f64 glfwGetTime(),
+    $dt_double = f64 $currentFrameTime - $lastFrameTime,
+    $lastFrameTime = f64 $currentFrameTime,
+    $dt = f32 $dt_double,
 
     ; X Movement
-    $right = i32 $glfwGetKey(voidptr $w, i32 $KEY_RIGHT),
-    $left  = i32 $glfwGetKey(voidptr $w, i32 $KEY_LEFT),
+    $right = i32 glfwGetKey(voidptr $w, i32 $KEY_RIGHT),
+    $left  = i32 glfwGetKey(voidptr $w, i32 $KEY_LEFT),
     $dirX  = i32 $right - $left,
     
     $moveX = f32 $dirX,
@@ -208,8 +202,8 @@ $posY = f32 0.0
     $posX  = f32 $posX + $moveX,
 
     ; Y Movement
-    $up    = i32 $glfwGetKey(voidptr $w, i32 $KEY_UP),
-    $down  = i32 $glfwGetKey(voidptr $w, i32 $KEY_DOWN),
+    $up    = i32 glfwGetKey(voidptr $w, i32 $KEY_UP),
+    $down  = i32 glfwGetKey(voidptr $w, i32 $KEY_DOWN),
     $dirY  = i32 $up - $down,
     
     $moveY = f32 $dirY,
@@ -232,11 +226,11 @@ $posY = f32 0.0
     void $glUniform2f(i32 $uOffsetLoc, f32 $posX, f32 $posY),
     void $glBindVertexArray(u32 $VAO),
     void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
-    void $glfwSwapBuffers(voidptr $w),
-    void $glfwPollEvents(),
+    void glfwSwapBuffers(voidptr $w),
+    void glfwPollEvents(),
 }
 
 ; Cleanup
 msvcrt.dll i32 printf(str "goodbye!\n")
-void free(voidptr $vertices)
+msvcrt.dll void free(voidptr $vertices)
 /quit

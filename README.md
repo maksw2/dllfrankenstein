@@ -337,7 +337,7 @@ Q: What is the scale of pointer math?
 A: Bytes. Always.
 
 Q: Does it support variable arguments?  
-A: Yes.
+A: Variadic promotion does not exist. You need to know which type to cast to.
 
 Q: Will you add fancy type parsing?  
 A: How about no.

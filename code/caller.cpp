@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
 
         try {
             std::vector<Token> tokens = tokenize(content);
-            for (auto& token : tokens) std::println("{}", token);
+            //for (auto& token : tokens) std::println("{}", token);
             parse_and_execute(tokens);
         } catch (const IncompleteInput&) {
             std::println(stderr, "Error: Script ended unexpectedly");
