@@ -1,4 +1,4 @@
-; gl5.ffi
+; gl4.ffi
 
 $startTime = kernel32.dll u32 GetTickCount()
 
@@ -68,6 +68,10 @@ $glUseProgram    = voidptr glfwGetProcAddress(str "glUseProgram") --assert=nonze
 $glDeleteShader  = voidptr glfwGetProcAddress(str "glDeleteShader") --assert=nonzero
 $glGetUniformLocation = voidptr glfwGetProcAddress(str "glGetUniformLocation") --assert=nonzero
 $glUniform2f          = voidptr glfwGetProcAddress(str "glUniform2f") --assert=nonzero
+$glGetShaderiv        = voidptr glfwGetProcAddress(str "glGetShaderiv") --assert=nonzero
+$glGetProgramiv       = voidptr glfwGetProcAddress(str "glGetProgramiv") --assert=nonzero
+$glGetShaderInfoLog   = voidptr glfwGetProcAddress(str "glGetShaderInfoLog") --assert=nonzero
+$glGetProgramInfoLog  = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --assert=nonzero
 
 ; Load math functions for clamping
 /loaddll ucrtbase.dll
@@ -96,15 +100,48 @@ void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STAT
 void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, voidptr 0)
 void $glEnableVertexAttribArray(u32 0)
 
+opengl32.dll void glClearColor(f32 0.1, f32 0.1, f32 0.1, f32 1.0)
+
 ; Shader Compilation
 
 $vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
 void $glShaderSource(u32 $vShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
 void $glCompileShader(u32 $vShader)
 
+$status = i32 0
+void $glGetShaderiv(u32 $vShader, u32 0x8B81, voidptr &$status)
+$fail = i32 1 - $status ; 1 = fail, 0 = success
+; if without an if lmao
+/for $fail {
+    $logLen = i32 0
+    void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+
+    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, voidptr 0, voidptr $logBuf)
+
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
+    msvcrt.dll void free(voidptr $logBuf)
+    /quit
+}
+
 $fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
 void $glShaderSource(u32 $fShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
 void $glCompileShader(u32 $fShader)
+
+$status = i32 0
+void $glGetShaderiv(u32 $fShader, u32 0x8B81, voidptr &$status)
+$fail = i32 1 - $status
+/for $fail {
+    $logLen = i32 0
+    void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+
+    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, voidptr 0, voidptr $logBuf)
+
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
+    msvcrt.dll void free(voidptr $logBuf)
+    /quit
+}
 
 $prog = u32 $glCreateProgram()
 void $glAttachShader(u32 $prog, u32 $vShader)
@@ -112,6 +149,21 @@ void $glAttachShader(u32 $prog, u32 $fShader)
 void $glLinkProgram(u32 $prog)
 void $glDeleteShader(u32 $vShader)
 void $glDeleteShader(u32 $fShader)
+
+$status = i32 0
+void $glGetProgramiv(u32 $prog, u32 0x8B82, voidptr &$status)
+$fail = i32 1 - $status
+/for $fail {
+    $logLen = i32 0
+    void $glGetProgramiv(u32 $prog, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+
+    $logBuf = voidptr malloc(u64 $logLen) --assert=nonzero
+    void $glGetProgramInfoLog(u32 $prog, i32 $logLen, voidptr 0, voidptr $logBuf)
+
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
+    msvcrt.dll void free(voidptr $logBuf)
+    /quit
+}
 
 $uOffsetLoc = i32 $glGetUniformLocation(u32 $prog, str "uOffset")
 
@@ -135,8 +187,8 @@ $posY = f32 0.0
 ; Main Loop
 /repeat { 
     i32 $glfwWindowShouldClose(voidptr $w) --assert=zero,
-
-    ;kernel32.dll void Sleep(i32 100),
+    $esc = i32 $glfwGetKey(voidptr $w, i32 256),
+    /assert $esc zero,
 
     $currentFrameTime = kernel32.dll u32 GetTickCount(),
     $deltaTimeMS = i32 $currentFrameTime - $lastFrameTime,
@@ -181,7 +233,7 @@ $posY = f32 0.0
     void $glBindVertexArray(u32 $VAO),
     void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
     void $glfwSwapBuffers(voidptr $w),
-    void $glfwPollEvents() 
+    void $glfwPollEvents(),
 }
 
 ; Cleanup

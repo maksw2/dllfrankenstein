@@ -15,10 +15,17 @@ The heap is not.
 Reality is not.  
 The ABI is respected. Your arguments are not.
 
+This is a personal systems playground.  
+There are no compatibility guarantees.  
+Syntax, semantics, and runtime behavior may change at any time.  
+If you build on this, you accept breakage as a feature.
+
 ## how 2 use it
 
 to build the app:
 - `build.bat`
+
+wow, a windows tool uses a windows scripting language for build 👻
 
 to build the test dll:
 - `cl /LD /Zi code\test.c /link /debug /out:examples\test.dll user32.lib gdi32.lib legacy_stdio_definitions.lib`
@@ -58,7 +65,7 @@ Variables have no scopes and should not be modified by any callee, for that use 
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
     *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
-    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)
+    Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double

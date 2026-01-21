@@ -1,181 +1,177 @@
 #include "lexer.hpp"
 #include <cctype>
-#include <cstdlib>
-#include <cstring>
+#include <charconv>
+#include <cctype>
 
-static bool is_ident_char(char c) {
-    return isalnum(c) || c == '_' || c == '.'; // allowed in names
-}
-
-std::vector<Token> tokenize(const char* src) {
+std::vector<Token> tokenize(std::string_view src) {
     std::vector<Token> tokens;
     int line = 1;
-    const char* p = src;
+    size_t cursor = 0;
 
-    while (*p) {
+    // Helper to peek at the current character
+    auto peek = [&](int offset = 0) -> char {
+        if (cursor + offset >= src.size()) return '\0';
+        return src[cursor + offset];
+    };
+
+    // Helper to advance and track lines automatically
+    auto advance = [&](int count = 1) {
+        for (int i = 0; i < count; ++i) {
+            if (cursor < src.size()) {
+                if (src[cursor] == '\n') line++;
+                cursor++;
+            }
+        }
+    };
+
+    while (cursor < src.size()) {
+        char c = peek();
+
         // Skip Whitespace
-        if (isspace(*p)) {
-            if (*p == '\n') line++;
-            p++;
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            advance();
             continue;
         }
 
         // Skip Comments
-        if (*p == ';' || (p[0] == '/' && p[1] == '/')) {
-            while (*p && *p != '\n') p++;
+        if (c == ';' || (c == '/' && peek(1) == '/')) {
+            while (peek() != '\0' && peek() != '\n') {
+                // We strictly do NOT use advance() here because we want 
+                // the newline to be handled by the whitespace logic 
+                // in the next iteration (to keep logic consistent).
+                cursor++; 
+            }
             continue; 
         }
 
-        // Flags (e.g. --print-result, --assert=zero)
-        // We catch this BEFORE subtraction (-) because -- is distinct.
-        if (p[0] == '-' && p[1] == '-') {
-            const char* start = p;
-            p += 2; // skip --
-            while (is_ident_char(*p) || *p == '-' || *p == '=') {
-                p++;
+        const size_t start = cursor;
+
+        // Flags (e.g. --print)
+        if (c == '-' && peek(1) == '-') {
+            advance(2); // skip --
+            while (isalnum(peek()) || peek() == '-' || peek() == '_' || peek() == '=') {
+                advance();
             }
-            tokens.push_back({TokenType::TOK_FLAG, std::string(start, p - start), line, 0});
+            tokens.push_back({TokenType::TOK_FLAG, std::string(src.substr(start, cursor - start)), line, 0});
             continue;
         }
 
         // Variables ($var)
-        // Merging $ and name makes parsing much safer
-        if (*p == '$') {
-            const char* start = p;
-            p++; // skip $
-            while (is_ident_char(*p)) p++;
-            tokens.push_back({TokenType::TOK_VARIABLE, std::string(start, p - start), line, 0});
+        if (c == '$') {
+            advance(); // skip $
+            while (isalnum(peek()) || peek() == '_') advance();
+            tokens.push_back({TokenType::TOK_VARIABLE, std::string(src.substr(start, cursor - start)), line, 0});
             continue;
         }
 
-        // Numbers (Hex, Int, Float)
-        // Check for digit OR .digit (like .5f)
-        if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
-            const char* start = p;
-            bool is_hex = false;
+        // Numbers
+        if (std::isdigit(static_cast<unsigned char>(c)) || (c == '.' && std::isdigit(static_cast<unsigned char>(peek(1))))) {
+            bool is_hex = (c == '0' && (peek(1) == 'x' || peek(1) == 'X'));
             bool is_float = false;
 
-            if (*p == '0' && (p[1] == 'x' || p[1] == 'X')) {
-                is_hex = true;
-                p += 2;
-            } else if (*p == '.') {
-                is_float = true;
-                p++;
-            }
+            if (is_hex) advance(2);
+            else if (c == '.') { is_float = true; advance(); }
 
-            while (isxdigit(*p) || *p == '.') {
-                if (*p == '.') is_float = true;
-                p++;
+            while (std::isxdigit(static_cast<unsigned char>(peek())) || peek() == '.') {
+                if (peek() == '.') is_float = true;
+                advance();
             }
             
-            // Handle float suffix 'f'
-            if (*p == 'f' || *p == 'F') {
+            if (peek() == 'f' || peek() == 'F') {
                 is_float = true;
-                p++;
+                advance();
             }
 
-            std::string text(start, p - start);
+            std::string_view text = src.substr(start, cursor - start);
             
             if (is_float) {
-                // We store the raw string for floats, value=0 for now
-                tokens.push_back({TokenType::TOK_FLOAT, text, line, 0});
+                tokens.push_back({TokenType::TOK_FLOAT, std::string(text), line, 0});
             } else {
-                uint64_t val = strtoull(text.c_str(), NULL, is_hex ? 16 : 10);
-                tokens.push_back({TokenType::TOK_INTEGER, text, line, val});
+                uint64_t val = 0;
+                // C++17 std::from_chars is faster and cleaner than strtoull
+                // It does not require a null-terminated string.
+                std::from_chars(text.data() + (is_hex ? 2 : 0), text.data() + text.size(), val, is_hex ? 16 : 10);
+                tokens.push_back({TokenType::TOK_INTEGER, std::string(text), line, val});
             }
             continue;
         }
 
         // Strings
-        if (*p == '"') {
-            p++;
+        if (c == '"') {
+            advance(); // Enter string
             std::string str_content;
-            while (*p && *p != '"') {
-                if (*p == '\\' && p[1]) {
-                    switch (p[1]) {
+            
+            while (peek() != '\0' && peek() != '"') {
+                char curr = peek();
+                if (curr == '\\' && peek(1)) {
+                    // Handle escapes
+                    char next = peek(1);
+                    switch (next) {
                         case 'n': str_content += '\n'; break;
                         case 't': str_content += '\t'; break;
                         case 'r': str_content += '\r'; break;
-                        case '\\': str_content += '\\'; break;
                         case '"': str_content += '"'; break;
-                        default: str_content += p[1]; break;
+                        case '\\': str_content += '\\'; break;
+                        default: str_content += next; break;
                     }
-                    p += 2;
+                    advance(2); // Consume \ and char
                 } else {
-                    str_content += *p++;
+                    // CRITICAL FIX: advance() tracks newlines here automatically
+                    str_content += curr;
+                    advance(); 
                 }
             }
-            if (*p == '"') p++;
+            
+            if (peek() == '"') advance(); // Closing quote
             tokens.push_back({TokenType::TOK_STRING, str_content, line, 0});
             continue;
         }
 
         // Identifiers
-        if (isalpha(*p) || *p == '_') {
-            const char* start = p;
-            while (is_ident_char(*p)) p++;
-            tokens.push_back({TokenType::TOK_IDENTIFIER, std::string(start, p - start), line, 0});
-            continue;
-        }
-
-        // Ordinals
-        if (*p == '#') {
-            const char* start = p;
-            p++; // Skip #
-            while (isdigit(*p)) p++;
-            // Treat as IDENTIFIER so the parser accepts it as a function name
-            tokens.push_back({TokenType::TOK_IDENTIFIER, std::string(start, p - start), line, 0});
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_' || peek() == '.') {
+                advance();
+            }
+            tokens.push_back({TokenType::TOK_IDENTIFIER, std::string(src.substr(start, cursor - start)), line, 0});
             continue;
         }
 
         // Symbols
         TokenType type = TokenType::TOK_EOF;
-        switch (*p) {
+        switch (c) {
             case '(': type = TokenType::TOK_LPAREN; break;
             case ')': type = TokenType::TOK_RPAREN; break;
             case '{': type = TokenType::TOK_LBRACE; break;
             case '}': type = TokenType::TOK_RBRACE; break;
             case ',': type = TokenType::TOK_COMMA; break;
             case '=': type = TokenType::TOK_EQUALS; break;
-            case '&': type = TokenType::TOK_AMP; break;
-            
             case '+': type = TokenType::TOK_PLUS; break;
             case '-': type = TokenType::TOK_MINUS; break;
             case '*': type = TokenType::TOK_STAR; break;
             case '/': type = TokenType::TOK_SLASH; break;
-            case '^': type = TokenType::TOK_XOR; break;
+            case '&': type = TokenType::TOK_AMP; break;
             case '|': type = TokenType::TOK_PIPE; break;
+            case '^': type = TokenType::TOK_XOR; break;
             case '~': type = TokenType::TOK_TILDE; break;
-
-            // Handle < and <<
+            
             case '<': 
-                if (*(p + 1) == '<') {
-                    type = TokenType::TOK_LSHIFT;
-                    p++; // Consume the second '<' so the main loop doesn't read it again
-                } else {
-                    type = TokenType::TOK_LT; 
-                }
+                if (peek(1) == '<') { type = TokenType::TOK_LSHIFT; advance(); } // eat extra char
+                else type = TokenType::TOK_LT;
                 break;
-
-            // Handle > and >>
             case '>': 
-                if (*(p + 1) == '>') {
-                    type = TokenType::TOK_RSHIFT;
-                    p++; // Consume the second '>'
-                } else {
-                    type = TokenType::TOK_GT; 
-                }
+                if (peek(1) == '>') { type = TokenType::TOK_RSHIFT; advance(); }
+                else type = TokenType::TOK_GT;
                 break;
         }
 
         if (type != TokenType::TOK_EOF) {
-            tokens.push_back({type, std::string(1, *p), line, 0});
-            p++;
+            tokens.push_back({type, std::string(1, c), line, 0});
+            advance();
             continue;
         }
 
-        // Unknown
-        p++;
+        // Unknown character
+        advance();
     }
 
     tokens.push_back({TokenType::TOK_EOF, "", line, 0});

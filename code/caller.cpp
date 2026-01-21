@@ -54,7 +54,7 @@ Variables have no scopes and should not be modified by any callee, for that use 
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
     *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
     $i is a reserved variable for loop iterations. It is intentionally not reset on break
-    Variables can be used as function arguments, like msvcrt.dll i32 printf(str \"%d\", i32 $<name>)
+    Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
     Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
 Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
     Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
@@ -77,9 +77,9 @@ void print(const char* format, ...) {
 
 template <>
 struct std::formatter<Token> : std::formatter<std::string_view> {
-    auto format(Token c, format_context& ctx) const {
+    auto format(Token t, format_context& ctx) const {
         std::string_view name = "Unknown";
-        switch (c.type) {
+        switch (t.type) {
             case TokenType::TOK_EOF: name = "EOF"; break;
             case TokenType::TOK_IDENTIFIER: name = "TOK_IDENTIFIER"; break;
             case TokenType::TOK_INTEGER: name = "TOK_INTEGER"; break;
@@ -100,7 +100,14 @@ struct std::formatter<Token> : std::formatter<std::string_view> {
             case TokenType::TOK_STAR: name = "TOK_STAR"; break;
             case TokenType::TOK_SLASH: name = "TOK_SLASH"; break;
         }
-        return std::formatter<std::string_view>::format(name, ctx);
+        // We use std::format_to to build a detailed string representation
+        if (t.type == TokenType::TOK_INTEGER) {
+            return std::format_to(ctx.out(), "[{}: \"{}\" (val: {}) at line {}]", 
+                                 name, t.text, t.int_val, t.line);
+        }
+        
+        return std::format_to(ctx.out(), "[{}: \"{}\" at line {}]", 
+                             name, t.text, t.line);
     }
 };
 
@@ -195,7 +202,7 @@ int main(int argc, char** argv) {
             buffer += line;
             
             try {
-                std::vector<Token> tokens = tokenize(buffer.c_str());
+                std::vector<Token> tokens = tokenize(buffer);
                 parse_and_execute(tokens);
                 
                 buffer.clear();
@@ -234,8 +241,8 @@ int main(int argc, char** argv) {
         std::string content = buffer.str();
 
         try {
-            std::vector<Token> tokens = tokenize(content.c_str());
-            //for (auto& token : tokens) std::println("{}", token);
+            std::vector<Token> tokens = tokenize(content);
+            for (auto& token : tokens) std::println("{}", token);
             parse_and_execute(tokens);
         } catch (const IncompleteInput&) {
             std::println(stderr, "Error: Script ended unexpectedly");

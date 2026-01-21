@@ -1,3 +1,8 @@
+; http.ffi
+; "cool" - GuestSneezePlays
+; "ok" - YourLocalMoon
+; "it works!" - maksw
+
 $AF_INET = i32 2
 $SOCK_STREAM = i32 1
 $IPPROTO_TCP = i32 6
@@ -15,12 +20,6 @@ $addr = msvcrt.dll voidptr malloc(u64 $raw_sockaddr_in_size) --assert=nonzero
 $req_buf = msvcrt.dll voidptr malloc(u64 32768) --assert=nonzero
 
 ; --- STRINGS SETUP ---
-$delim = str " "
-
-$sec_dot = str ".."
-$sec_colon = str ":"
-$sec_back = str "\\"
-
 $ext_html = str ".html"
 $ext_js   = str ".js"
 $ext_css  = str ".css"
@@ -46,7 +45,7 @@ i32 WSAStartup(u16 0x0202, voidptr $wsa) --assert=zero
 $server_socket = u64 socket(i32 $AF_INET, i32 $SOCK_STREAM, i32 $IPPROTO_TCP)
 
 /set $addr + $sin_family_off u16 $AF_INET
-$sin_port = u16 htons(u16 $port)
+$sin_port  = u16 htons(u16 $port)
 /set $addr + $sin_port_off u16 $sin_port
 /set $addr + $sin_addr_off u32 0
 
@@ -66,149 +65,81 @@ msvcrt.dll i32 printf(str "server started on %hhu\n", u8 $port)
     /set $req_buf + $received u8 0
 
     $filename_ptr = voidptr $req_buf + 5
-    $token = msvcrt.dll voidptr strtok(voidptr $filename_ptr, voidptr $delim)
+    $token = msvcrt.dll voidptr strtok(voidptr $filename_ptr, str " ")
 
     $hFile = kernel32.dll voidptr CreateFileA(voidptr $filename_ptr, u32 $GENERIC_READ, u32 0, voidptr 0, u32 $OPEN_EXISTING, u32 0, voidptr 0)
 
-    $ptr_dot = msvcrt.dll voidptr strstr(voidptr $filename_ptr, voidptr $sec_dot)
-    $ptr_colon = msvcrt.dll voidptr strstr(voidptr $filename_ptr, voidptr $sec_colon)
-    $ptr_back = msvcrt.dll voidptr strstr(voidptr $filename_ptr, voidptr $sec_back)
+    $ptr_dot = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str "..")
+    $ptr_colon = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str ":")
+    $ptr_back = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str "\\")
 
     $unsafe = u64 $ptr_dot | $ptr_colon
     $unsafe = u64 $unsafe | $ptr_back
     
-    ; Set sign bit if non-zero
     $unsafe_i = i64 $unsafe
-    $u_neg = i64 -$unsafe_i
-    $u_or = i64 $unsafe_i | $u_neg
-    ; Shift sign bit to bottom (Result is 1 or -1)
+    $u_or = i64 $unsafe_i | -$unsafe_i
     $u_shift = i64 $u_or >> 63
-    ; Expand 1 to -1 (All 1s)
-    $u_shift_neg = i64 -$u_shift
-    $u_mask = i64 $u_shift | $u_shift_neg
-    ; Invert for Safety Mask (0 if unsafe, -1 if safe)
-    $safety_mask = i64 ~$u_mask
-    ; Normalize to 1 (0 or 1) for arithmetic
-    $safety_bool = i64 $safety_mask & 1
+    $u_mask = i64 $u_shift | -$u_shift
+    $safety_bool = i64 (~$u_mask) & 1
 
     ; Check if file exists
-    $tmp = u64 $hFile ^ 0xFFFFFFFFFFFFFFFF
-    $neg = i64 -$tmp
-    $or = u64 $tmp | $neg
+    $neg = i64 -($hFile ^ 0xFFFFFFFFFFFFFFFF)
+    $or = u64 ($hFile ^ 0xFFFFFFFFFFFFFFFF) | $neg
     $or_i = i64 $or
-    $tmp2 = i64 $or_i >> 63
-    ; Robust expansion not strictly needed for & 1, but safe:
-    $tmp2_neg = i64 -$tmp2
-    $exists_mask_full = i64 $tmp2 | $tmp2_neg
-    $file_exists_bool = i64 $exists_mask_full & 1
+    $file_exists_bool = i64 (($or_i >> 63) | -($or_i >> 63)) & 1
     
-    ; Combine Bools (0 or 1)
-    $mask_bool = i64 $file_exists_bool & $safety_bool
+    $mask_bool = $file_exists_bool & $safety_bool
     $inv_mask_bool = i64 1 - $mask_bool
 
     ; Find extension
     $dot_ptr = msvcrt.dll voidptr strrchr(voidptr $filename_ptr, i32 46)
 
     ; Handle NULL dot_ptr
-    $d_val = i64 $dot_ptr
-    $d_neg = i64 -$d_val
-    $d_or  = i64 $d_val | $d_neg
-    $d_shift = i64 $d_or >> 63
-
-    ; Expand to Full Mask (-1)
-    $d_shift_neg = i64 -$d_shift
-    $dot_exists_mask = i64 $d_shift | $d_shift_neg
-    $inv_dot_exists_mask = i64 ~$dot_exists_mask
-
-    ; Select Safe Dot String
-    $safe_dot = u64 $dot_ptr & $dot_exists_mask
-    $fallback_ptr = u64 $delim & $inv_dot_exists_mask
-    $safe_dot = u64 $safe_dot | $fallback_ptr
+    $d_shift = i64 ($dot_ptr | -$dot_ptr) >> 63
+    $safe_dot = u64 ($dot_ptr & ($d_shift | -$d_shift)) | ( ~($d_shift | -$d_shift) )
 
     ; Compare and Build Masks
     ; We want -1 if Match (0), 0 if Diff.
-    
+
     ; HTML
-    $d_html = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_html)
-    $d_html_i = i64 $d_html
-    $neg_html = i64 -$d_html_i
-    $dh_or  = i64 $d_html_i | $neg_html
-    $dh_shift = i64 $dh_or >> 63
-    ; Expand 1 -> -1 (This gives -1 if Diff, 0 if Match)
-    $dh_neg = i64 -$dh_shift
-    $dh_diff_mask = i64 $dh_shift | $dh_neg
-    ; Invert (This gives 0 if Diff, -1 if Match)
-    $m_html = i64 ~$dh_diff_mask
-    
+    $d_html   = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_html)
+    $dh_shift = i64 ( ($d_html) | (-$d_html) ) >> 63
+    $m_html   = i64 ~( ($dh_shift) | (-$dh_shift) )
+
     ; JS
-    $d_js   = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_js)
-    $d_js_i = i64 $d_js
-    $neg_js = i64 -$d_js_i
-    $dj_or  = i64 $d_js_i | $neg_js
-    $dj_shift = i64 $dj_or >> 63
-    $dj_neg = i64 -$dj_shift
-    $dj_diff_mask = i64 $dj_shift | $dj_neg
-    $m_js   = i64 ~$dj_diff_mask
+    $d_js     = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_js)
+    $dj_shift = i64 ( ($d_js) | (-$d_js) ) >> 63
+    $m_js     = i64 ~( ($dj_shift) | (-$dj_shift) )
 
     ; CSS
-    $d_css  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_css)
-    $d_css_i = i64 $d_css
-    $neg_css = i64 -$d_css_i
-    $dc_or  = i64 $d_css_i | $neg_css
-    $dc_shift = i64 $dc_or >> 63
-    $dc_neg = i64 -$dc_shift
-    $dc_diff_mask = i64 $dc_shift | $dc_neg
-    $m_css  = i64 ~$dc_diff_mask
+    $d_css    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_css)
+    $dc_shift = i64 ( ($d_css) | (-$d_css) ) >> 63
+    $m_css    = i64 ~( ($dc_shift) | (-$dc_shift) )
 
     ; JPG
-    $d_jpg  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpg)
-    $d_jpg_i = i64 $d_jpg
-    $neg_jpg = i64 -$d_jpg_i
-    $djg_or  = i64 $d_jpg_i | $neg_jpg
-    $djg_shift = i64 $djg_or >> 63
-    $djg_neg = i64 -$djg_shift
-    $djg_diff_mask = i64 $djg_shift | $djg_neg
-    $m_jpg  = i64 ~$djg_diff_mask
+    $d_jpg    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpg)
+    $djg_shift = i64 ( ($d_jpg) | (-$d_jpg) ) >> 63
+    $m_jpg    = i64 ~( ($djg_shift) | (-$djg_shift) )
 
     ; JPEG
-    $d_jpeg  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpeg)
-    $d_jpeg_i = i64 $d_jpeg
-    $neg_jpeg = i64 -$d_jpeg_i
-    $dje_or  = i64 $d_jpeg_i | $neg_jpeg
-    $dje_shift = i64 $dje_or >> 63
-    $dje_neg = i64 -$dje_shift
-    $dje_diff_mask = i64 $dje_shift | $dje_neg
-    $m_jpeg  = i64 ~$dje_diff_mask
-    
+    $d_jpeg   = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpeg)
+    $dje_shift = i64 ( ($d_jpeg) | (-$d_jpeg) ) >> 63
+    $m_jpeg   = i64 ~( ($dje_shift) | (-$dje_shift) )
+
     ; PNG
-    $d_png  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_png)
-    $d_png_i = i64 $d_png
-    $neg_png = i64 -$d_png_i
-    $dp_or  = i64 $d_png_i | $neg_png
-    $dp_shift = i64 $dp_or >> 63
-    $dp_neg = i64 -$dp_shift
-    $dp_diff_mask = i64 $dp_shift | $dp_neg
-    $m_png  = i64 ~$dp_diff_mask
+    $d_png    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_png)
+    $dp_shift = i64 ( ($d_png) | (-$d_png) ) >> 63
+    $m_png    = i64 ~( ($dp_shift) | (-$dp_shift) )
 
     ; TXT
-    $d_txt  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_txt)
-    $d_txt_i = i64 $d_txt
-    $neg_txt = i64 -$d_txt_i
-    $dt_or  = i64 $d_txt_i | $neg_txt
-    $dt_shift = i64 $dt_or >> 63
-    $dt_neg = i64 -$dt_shift
-    $dt_diff_mask = i64 $dt_shift | $dt_neg
-    $m_txt  = i64 ~$dt_diff_mask
+    $d_txt    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_txt)
+    $dt_shift = i64 ( ($d_txt) | (-$d_txt) ) >> 63
+    $m_txt    = i64 ~( ($dt_shift) | (-$dt_shift) )
 
     ; ICO
     $d_ico  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_ico)
-    $d_ico_i = i64 $d_ico
-    $neg_ico = i64 -$d_ico_i
-    $di_or  = i64 $d_ico_i | $neg_ico
-    $di_shift = i64 $di_or >> 63
-    $di_neg = i64 -$di_shift
-    $di_diff_mask = i64 $di_shift | $di_neg
-    $m_ico  = i64 ~$di_diff_mask
+    $di_shift = i64 ( ($d_ico) | (-$d_ico) ) >> 63
+    $m_ico = i64 ~( ($di_shift) | (-$di_shift) )
 
     ; Calculate Default Mask
     $any_match = i64 $m_html | $m_js
@@ -221,32 +152,15 @@ msvcrt.dll i32 printf(str "server started on %hhu\n", u8 $port)
     $m_def     = i64 ~$any_match
 
     ; Select String (Bitwise Multiplexer)
-    $tmp_ptr  = u64 $mime_html & $m_html
-    $sel_mime = u64 $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_js & $m_js
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_css & $m_css
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_jpg & $m_jpg
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-    
-    $tmp_ptr  = u64 $mime_jpg & $m_jpeg
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_png & $m_png
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_txt & $m_txt
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_ico & $m_ico
-    $sel_mime = u64 $sel_mime | $tmp_ptr
-
-    $tmp_ptr  = u64 $mime_def & $m_def
-    $sel_mime = u64 $sel_mime | $tmp_ptr
+    $sel_mime = u64 $mime_html & $m_html
+    $sel_mime = u64 $sel_mime | ($mime_js & $m_js)
+    $sel_mime = u64 $sel_mime | ($mime_css & $m_css)
+    $sel_mime = u64 $sel_mime | ($mime_jpg & $m_jpg)
+    $sel_mime = u64 $sel_mime | ($mime_jpeg & $m_jpeg)
+    $sel_mime = u64 $sel_mime | ($mime_png & $m_png)
+    $sel_mime = u64 $sel_mime | ($mime_txt & $m_txt)
+    $sel_mime = u64 $sel_mime | ($mime_ico & $m_ico)
+    $sel_mime = u64 $sel_mime | ($mime_def & $m_def)
 
     msvcrt.dll i32 printf(str "req file: %s, req mime: %s\n", voidptr $filename_ptr, voidptr $sel_mime)
 
@@ -281,7 +195,6 @@ msvcrt.dll void free(voidptr $req_buf)
 msvcrt.dll void free(voidptr $head200_buf)
 msvcrt.dll void free(voidptr $head404_buf)
 msvcrt.dll void free(voidptr $tmp_buf)
-msvcrt.dll void free(voidptr $delim)
 
 msvcrt.dll i32 printf(str "goodbye!\n")
 /quit

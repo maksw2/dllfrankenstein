@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <vector>
 #include <cstdint>
 
@@ -30,4 +31,4 @@ struct Token {
     uint64_t int_val; // Pre-parsed integer value if type == TOK_INTEGER
 };
 
-std::vector<Token> tokenize(const char* source);
+std::vector<Token> tokenize(std::string_view src);
