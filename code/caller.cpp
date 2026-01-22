@@ -22,12 +22,13 @@ bool g_quiet = false;
 const std::string help_string = R"(
 wilczurski's cool shit - ffi
 Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...)
-        [--print-result] [--assert[v]=<type>]
+        [--print-result] [--assert[v]=<type>] [--quiet]
     <func_name> can be an ordinal like #<ordinal>
     or: invoke.exe --interactive or invoke.exe --script <script_path>
     <type> can be: zero, nonzero, negative, nonnegative
     assertv reports success/failure where assert exits if failure
     The exception to this is usage in loops, there it is used as an exit condition
+    --quiet does not emit any prints to the console except errors. Also silences all struct definitions.
     Scripts by default use .ffi, it is not enforced
 Usage in interactive/script mode is the same as non-interactive with more features
     except when focused on a DLL, then you don't need to specify <dll_path>
@@ -41,9 +42,10 @@ Commands in interactive/script mode:
     /address <dll_path> <name>          Get a function pointer by name or #ordinal
     /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
     /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets
-    Both assume default packing and return the size. You can have structs in structs
+    Both assume default packing and return the size. You can have structs in structs.
+    Use the --quiet flag to suppress debug output. Local to this declaration
     /dlls                               List loaded DLLs
-    /for     <count>    {<cmd>, ...}    Repeat {} <count> times. If you're stubborn enough you can use it as an if
+    /for     <count>    {<cmd>, ...}    Repeat {} <count> times. You can use this as an if you're stubborn enough
     /repeat             {<cmd>, ...}    Repeat {} until assert failure
     /quit                               Exit the program
 Variables have no scopes and should not be modified by any callee, for that use malloc
