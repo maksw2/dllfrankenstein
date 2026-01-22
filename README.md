@@ -325,7 +325,13 @@ Q: Can I use this in production?
 A: If you're brave enough. No warranty.
 
 Q: Why is the syntax like this?  
-A: It made sense at 3 AM.
+A: It made sense at 3 AM.  
+The syntax was inspired by:  
+comments: assembly  
+variables: powershell  
+commands: factorio  
+surface syntax: c  
+alcohol: types
 
 Q: It crashed!  
 A: Open an issue. **Describe it well.** “It crashed” is not a report.
