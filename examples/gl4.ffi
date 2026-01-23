@@ -11,6 +11,7 @@ $GL_VERTEX_SHADER    = i32 0x8B31
 $GL_FRAGMENT_SHADER  = i32 0x8B30
 $GL_FLOAT            = i32 0x1406
 $GL_FALSE            = i32 0
+$GL_INFO_LOG_LENGTH  = i32 0x8B84
 
 ; GLFW Key Constants
 $KEY_RIGHT = i32 262
@@ -116,14 +117,14 @@ void $glGetShaderiv(u32 $vShader, u32 0x8B81, voidptr &$status)
 $fail = i32 1 - $status ; 1 = fail, 0 = success
 ; if without an if lmao
 /for $fail {
-    $logLen = i32 0
-    void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+    $logLen = i32 0,
+    void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
 
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
-    void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, voidptr 0, voidptr $logBuf)
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
+    void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, voidptr 0, voidptr $logBuf),
 
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
-    msvcrt.dll void free(voidptr $logBuf)
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
+    msvcrt.dll void free(voidptr $logBuf),
     /quit
 }
 
@@ -135,14 +136,14 @@ $status = i32 0
 void $glGetShaderiv(u32 $fShader, u32 0x8B81, voidptr &$status)
 $fail = i32 1 - $status
 /for $fail {
-    $logLen = i32 0
-    void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+    $logLen = i32 0,
+    void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
 
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
-    void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, voidptr 0, voidptr $logBuf)
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
+    void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, voidptr 0, voidptr $logBuf),
 
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
-    msvcrt.dll void free(voidptr $logBuf)
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
+    msvcrt.dll void free(voidptr $logBuf),
     /quit
 }
 
@@ -157,14 +158,14 @@ $status = i32 0
 void $glGetProgramiv(u32 $prog, u32 0x8B82, voidptr &$status)
 $fail = i32 1 - $status
 /for $fail {
-    $logLen = i32 0
-    void $glGetProgramiv(u32 $prog, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen)
+    $logLen = i32 0,
+    void $glGetProgramiv(u32 $prog, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
 
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero
-    void $glGetProgramInfoLog(u32 $prog, i32 $logLen, voidptr 0, voidptr $logBuf)
+    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
+    void $glGetProgramInfoLog(u32 $prog, i32 $logLen, voidptr 0, voidptr $logBuf),
 
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf)
-    msvcrt.dll void free(voidptr $logBuf)
+    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
+    msvcrt.dll void free(voidptr $logBuf),
     /quit
 }
 

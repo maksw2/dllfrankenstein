@@ -182,3 +182,5 @@ By engaging with dllfrankenstein™ Enterprise Edition, you agree that:
 
 **dllfrankenstein™ Enterprise Edition**
 *Because Governance Is a Feeling.* 🏢🔥
+
+Premium Support™ available. Terms and conditions apply. Support quality not guaranteed. Expectations should be managed. Risk is yours. Profit is mine.
