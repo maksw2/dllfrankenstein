@@ -170,6 +170,7 @@ static Value parse_expression(ParseContext* ctx);
 static uint64_t handle_address(ParseContext* ctx);
 static Value handle_get(ParseContext* ctx);
 static Layout handle_struct(ParseContext* ctx, std::string member_name = "root");
+static Value perform_cast(Value val, TypeKind target);
 
 // this fucking bitch
 static Value parse_factor(ParseContext* ctx) {
@@ -249,7 +250,8 @@ static Value parse_factor(ParseContext* ctx) {
                 return { TypeKind::TYPE_STR, (uint64_t)get_cached_wstring(full_str) };
             }
 
-            return parse_factor(ctx); 
+            Value v = parse_factor(ctx); 
+            return perform_cast(v, type);
         }
     }
 
@@ -859,7 +861,6 @@ static Value perform_cast(Value val, TypeKind target) {
     // Convert current value to a "working" double or int64
     double intermediate_f;
     int64_t intermediate_i;
-    bool is_input_float = (val.type == TypeKind::TYPE_F32 || val.type == TypeKind::TYPE_F64);
 
     if (val.type == TypeKind::TYPE_F32) {
         float f; memcpy(&f, &val.value, 4);
@@ -870,7 +871,18 @@ static Value perform_cast(Value val, TypeKind target) {
         intermediate_f = d;
         intermediate_i = (int64_t)d;
     } else {
-        intermediate_i = (int64_t)val.value;
+        // Explicitly sign-extend or zero-extend based on type
+        switch (val.type) {
+            case TypeKind::TYPE_I8:  intermediate_i = (int64_t)(int8_t)val.value; break;
+            case TypeKind::TYPE_I16: intermediate_i = (int64_t)(int16_t)val.value; break;
+            case TypeKind::TYPE_I32: intermediate_i = (int64_t)(int32_t)val.value; break;
+            case TypeKind::TYPE_I64: intermediate_i = (int64_t)val.value; break;
+            // Unsigned types (zero extension)
+            case TypeKind::TYPE_U8:  intermediate_i = (int64_t)(uint8_t)val.value; break;
+            case TypeKind::TYPE_U16: intermediate_i = (int64_t)(uint16_t)val.value; break;
+            case TypeKind::TYPE_U32: intermediate_i = (int64_t)(uint32_t)val.value; break;
+            default:                 intermediate_i = (int64_t)val.value; break;
+        }
         intermediate_f = (double)intermediate_i;
     }
 
@@ -888,9 +900,12 @@ static Value perform_cast(Value val, TypeKind target) {
             memcpy(&result.value, &d, 8);
             break;
         }
-        case TypeKind::TYPE_I8:   result.value = (int8_t)intermediate_i; break;
-        case TypeKind::TYPE_I32:  result.value = (int32_t)intermediate_i; break;
+        case TypeKind::TYPE_I8:   result.value = (int64_t)(int8_t)intermediate_i; break;
+        case TypeKind::TYPE_I16:  result.value = (int64_t)(int16_t)intermediate_i; break;
+        case TypeKind::TYPE_I32:  result.value = (int64_t)(int32_t)intermediate_i; break;
         case TypeKind::TYPE_I64:  result.value = (int64_t)intermediate_i; break;
+        case TypeKind::TYPE_U8:   result.value = (uint8_t)intermediate_i; break;
+        case TypeKind::TYPE_U16:  result.value = (uint16_t)intermediate_i; break;
         case TypeKind::TYPE_U32:  result.value = (uint32_t)intermediate_i; break;
         case TypeKind::TYPE_U64:  result.value = (uint64_t)intermediate_i; break;
         case TypeKind::TYPE_PTR:  result.value = (uint64_t)intermediate_i; break;

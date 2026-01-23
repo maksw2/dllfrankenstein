@@ -133,7 +133,51 @@ uint64_t var_get_addr(const std::string& name) {
 }
 
 // Set a variable
+enum class TypeCategory {
+    CAT_INTEGER, CAT_FLOAT, CAT_STRING, CAT_POINTER, CAT_VOID, CAT_OTHER
+};
+
+TypeCategory get_category(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::TYPE_I8:  case TypeKind::TYPE_I16: 
+        case TypeKind::TYPE_I32: case TypeKind::TYPE_I64:
+        case TypeKind::TYPE_U8:  case TypeKind::TYPE_U16: 
+        case TypeKind::TYPE_U32: case TypeKind::TYPE_U64:
+            return TypeCategory::CAT_INTEGER;
+            
+        case TypeKind::TYPE_F32: case TypeKind::TYPE_F64:
+            return TypeCategory::CAT_FLOAT;
+            
+        case TypeKind::TYPE_STR: case TypeKind::TYPE_WSTR:
+            return TypeCategory::CAT_STRING;
+            
+        case TypeKind::TYPE_PTR:
+            return TypeCategory::CAT_POINTER;
+            
+        case TypeKind::TYPE_VOID:
+            return TypeCategory::CAT_VOID;
+            
+        default:
+            return TypeCategory::CAT_OTHER;
+    }
+}
+
 void var_set(const std::string& name, Value val) {
+    auto it = vars.find(name);
+
+    if (it != vars.end()) {
+        Value& old = it->second;
+        
+        // Skip check if the variable was previously "untyped" (VOID)
+        if (old.type != TypeKind::TYPE_VOID) {
+            // Compare categories rather than raw enum values
+            if (get_category(val.type) != get_category(old.type)) {
+                throw SyntaxError("Fundamental type mismatch: Cannot assign " + 
+                                   std::to_string((int)val.type) + " to category " + 
+                                   std::to_string((int)get_category(old.type)));
+            }
+        }
+    }
     vars[name] = val;
 }
 
