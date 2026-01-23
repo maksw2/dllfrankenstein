@@ -178,10 +178,6 @@ int main(int argc, char** argv) {
         else if (arg == "--quiet") {
             g_quiet = true;
         } 
-        else {
-            std::println("Unknown argument: {}", arg);
-            return 1;
-        }
     }
 
     if (g_interactive) {
