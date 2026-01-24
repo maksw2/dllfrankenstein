@@ -13,7 +13,8 @@ The stack is protected.
 The registers are protected.  
 The heap is not.  
 Reality is not.  
-The ABI is respected. Your arguments are not.
+The ABI is respected. Your arguments are not.  
+All states are legal. Some are regrettable.
 
 This is a personal systems playground.  
 There are no compatibility guarantees.  
