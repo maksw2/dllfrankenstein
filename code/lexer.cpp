@@ -2,6 +2,7 @@
 #include <cctype>
 #include <charconv>
 #include <cctype>
+#include <stdexcept>
 
 std::vector<Token> tokenize(std::string_view src) {
     std::vector<Token> tokens;
@@ -171,7 +172,7 @@ std::vector<Token> tokenize(std::string_view src) {
         }
 
         // Unknown character
-        advance();
+        throw std::runtime_error("Unexpected character '" + std::string(1, c) + "' at line " + std::to_string(line));
     }
 
     tokens.push_back({TokenType::TOK_EOF, "", line, 0});

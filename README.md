@@ -326,8 +326,10 @@ Q: Can I use this in production?
 A: If you're brave enough. No warranty.
 
 Q: Why is the syntax like this?  
-A: It made sense at 3 AM.  
-The syntax was inspired by:  
+A: It made sense at 3 AM.
+
+Q: What inspired the syntax?  
+A: The syntax was inspired by:  
 comments: assembly  
 variables: powershell  
 commands: factorio  
