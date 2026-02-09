@@ -5,6 +5,8 @@ Manually load DLLs, manipulate memory, and invoke native functions.
 With great power comes great segfaults.  
 scary shit
 
+Unix gives you just enough rope to hang yourself – and then a couple of more feet, just to be sure. ~ Eric Allman
+
 ## warning
 
 Lying about signatures may corrupt memory, program state, or cause delayed crashes.
