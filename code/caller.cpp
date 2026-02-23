@@ -48,7 +48,7 @@ Commands in interactive/script mode:
     /for     <count>    {<cmd>, ...}    Repeat {} <count> times. You can use this as an if you're stubborn enough
     /repeat             {<cmd>, ...}    Repeat {} until assert failure
     /quit                               Exit the program
-Variables have no scopes and should not be modified by any callee, for that use malloc
+Variables have no scopes. Beware not to write more than 8 bytes. Strings are read-only, use malloc if you need a mutable string.
     $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)
     $<name> = <command>         Capture command/function output into variable
     &$<name>                    Address-of: Get the memory pointer to a variable's storage
