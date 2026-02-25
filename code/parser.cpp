@@ -15,7 +15,11 @@ struct RegisteredDLL {
     HMODULE handle;
 };
 
-static std::unordered_map<std::string, char*> g_str_cache;
+struct CachedBuffer {
+    char* data;
+    size_t length;
+};
+static std::unordered_map<std::string, CachedBuffer> g_str_cache;
 static std::unordered_map<std::string, wchar_t*> g_wstr_cache;
 
 static RegisteredDLL g_registry[32];
@@ -63,9 +67,28 @@ static Token consume(ParseContext* ctx, enum TokenType type, const char* err) {
 
 // --- String Cache Helpers ---
 
-static char* get_cached_string(const std::string& s) {
+static CachedBuffer get_cached_string(const std::string& s) {
     if (g_str_cache.find(s) == g_str_cache.end()) {
-        g_str_cache[s] = _strdup(s.c_str());
+        std::vector<char> buffer;
+        buffer.reserve(s.size());
+
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '\\' && i + 3 < s.size() && s[i+1] == 'x') {
+                char* endptr = nullptr;
+                std::string hex_str = s.substr(i + 2, 2);
+                unsigned long byte = strtoul(hex_str.c_str(), &endptr, 16);
+                buffer.push_back(static_cast<char>(byte));
+                i += 3;
+            } else {
+                buffer.push_back(s[i]);
+            }
+        }
+        
+        // Allocate exact size and copy (including null bytes)
+        char* final_buf = (char*)malloc(buffer.size());
+        memcpy(final_buf, buffer.data(), buffer.size());
+        
+        g_str_cache[s] = { final_buf, buffer.size() };
     }
     return g_str_cache[s];
 }
@@ -276,7 +299,7 @@ static Value parse_factor(ParseContext* ctx) {
             full_str += advance(ctx).text;
         }
         // Use Cache!
-        return { TypeKind::TYPE_STR, (uint64_t)get_cached_string(full_str) };
+        return { TypeKind::TYPE_STR, (uint64_t)get_cached_string(full_str).data };
     }
 
     if (match(ctx, TokenType::TOK_LPAREN)) {
@@ -465,11 +488,13 @@ static void handle_set(ParseContext* ctx) {
     TypeKind type = token_to_type(type_tok.text);
     
     uint64_t val = 0;
+    CachedBuffer cached_str = {nullptr, 0};
 
     // Special handling for string literals to perform conversion if needed
     if (type == TypeKind::TYPE_STR && peek(ctx).type == TokenType::TOK_STRING) {
         Token s = advance(ctx);
-        val = (uint64_t)strdup(s.text.c_str()); 
+        cached_str = get_cached_string(s.text);
+        val = (uint64_t)cached_str.data;
     }
     else if (type == TypeKind::TYPE_WSTR && peek(ctx).type == TokenType::TOK_STRING) {
         // Auto-convert literal string to wstr
@@ -494,7 +519,7 @@ static void handle_set(ParseContext* ctx) {
         case TypeKind::TYPE_U64: *(uint64_t*)addr = (uint64_t)val; break;
         case TypeKind::TYPE_F32: { float f; memcpy(&f,&val,4); *(float*)addr = f; } break;
         case TypeKind::TYPE_F64: { double d; memcpy(&d,&val,8); *(double*)addr = d; } break;
-        case TypeKind::TYPE_STR: if (val) strcpy((char*)addr, (char*)val); break;
+        case TypeKind::TYPE_STR: if (addr && cached_str.data) memcpy((void*)addr, cached_str.data, cached_str.length); break;
         case TypeKind::TYPE_WSTR: if (val) wcscpy((wchar_t*)addr, (wchar_t*)val); break;
         case TypeKind::TYPE_PTR: *(uint64_t*)addr = val; break;
         default: printf("Unsupported set type\n"); break;
