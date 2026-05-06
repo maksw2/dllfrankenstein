@@ -56,7 +56,7 @@ $head200_buf = msvcrt.dll voidptr malloc(u64 2048) --assert=nonzero
 $head404_buf = msvcrt.dll voidptr malloc(u64 2048) --assert=nonzero
 $tmp_buf     = msvcrt.dll voidptr malloc(u64 128)  --assert=nonzero
 
-msvcrt.dll i32 printf(str "server started on %hhu\n", u8 $port)
+msvcrt.dll i32 printf(str "server started on %hu\n", u16 $port)
 
 /repeat {
     $client_socket = u64 accept(u64 $server_socket, voidptr 0, voidptr 0)

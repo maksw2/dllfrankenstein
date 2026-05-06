@@ -9,14 +9,21 @@ Unix gives you just enough rope to hang yourself – and then a couple of more f
 
 ## warning
 
-Lying about signatures may corrupt memory, program state, or cause delayed crashes.
+This tool does not validate function signatures.
+If you lie, the program will believe you.
 
-The stack is protected.  
-The registers are protected.  
-The heap is not.  
-Reality is not.  
-The ABI is respected. Your arguments are not.  
-All states are legal. Some are regrettable.
+The stack is protected.
+The registers are protected.
+The heap is not.
+
+The ABI is respected.
+Your arguments are not.
+
+All states are legal.
+Some are regrettable.
+
+SEH will catch crashes.
+It will not save your program.
 
 This is a personal systems playground.  
 There are no compatibility guarantees.  
@@ -357,4 +364,4 @@ Q: Does it support variable arguments?
 A: Variadic argument promotion does not exist. You need to know which type to cast to.
 
 Q: Will you add fancy type parsing?  
-A: How about no.
+A: Let's circle back on this in Q4.

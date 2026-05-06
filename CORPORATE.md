@@ -35,6 +35,18 @@ We are **actively pursuing alignment with**:
 
 ---
 
+## 🏗️ System Architecture Diagram™
+
+User Input
+↓
+Assumptions
+↓
+Undefined Behavior
+↓
+Results (Non-Binding)
+
+---
+
 ## 🛡️ Security Posture
 
 Security is a **top priority** at dllfrankenstein™.
@@ -105,6 +117,15 @@ Benchmarks are **context-dependent** and therefore omitted.
 
 ---
 
+## 📊 Key Performance Indicators™
+
+- Uptime: Depends
+- Reliability: Situational
+- Determinism: Aspirational
+- Safety: Delegated
+
+---
+
 ## 🧪 Quality Assurance Framework™
 
 We employ a **multi-layered quality strategy**, including:
@@ -115,6 +136,16 @@ We employ a **multi-layered quality strategy**, including:
 * Post-incident learning
 
 All bugs are **features pending prioritization**.
+
+---
+
+## 🚀 Release Strategy™
+
+We follow a continuous delivery model:
+
+- Features are released when ready
+- Bugs are released immediately
+- Stability is achieved over time (theoretically)
 
 ---
 
