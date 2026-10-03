@@ -1,34 +1,54 @@
 #pragma once
+#include "source.hpp"
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <cstdint>
 
-enum class TokenType {
-    TOK_EOF = 0,
-    TOK_IDENTIFIER, 
-    TOK_INTEGER,
-    TOK_FLOAT,
-    TOK_STRING,
-    TOK_RAW_STRING,
-    TOK_VARIABLE,
-    TOK_FLAG,
-    
-    TOK_LPAREN, TOK_RPAREN,
-    TOK_LBRACE, TOK_RBRACE,
-    TOK_COMMA, TOK_EQUALS,
-    TOK_AMP,
+enum class TokenKind : uint16_t {
+    Eof,
+    Identifier,
+    Variable,
+    Integer,
+    Float,
+    String,
 
-    TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_SLASH,
-    TOK_LSHIFT, TOK_RSHIFT, TOK_LT, TOK_GT,
-    TOK_XOR, TOK_PIPE, TOK_TILDE
+    LParen, RParen,
+    LBrace, RBrace,
+    LBracket, RBracket,
+    Comma, Dot,
+
+    Equal,
+    EqualEqual,
+    Bang,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Amp,
+    AmpAmp,
+    Pipe,
+    PipePipe,
+    Caret,
+    Tilde,
+    ShiftLeft,
+    ShiftRight,
 };
 
 struct Token {
-    enum TokenType type;
-    std::string text; 
-    int line;         // For error reporting
-    uint64_t int_val; // Pre-parsed integer value if type == TOK_INTEGER
+    TokenKind kind = TokenKind::Eof;
+    std::string text;
+    SourceSpan span{};
+    uint64_t integer = 0;
+    double floating = 0.0;
 };
 
-std::vector<Token> tokenize(std::string_view src);
+std::vector<Token> tokenize(std::string_view source);
+const char* token_kind_name(TokenKind kind);

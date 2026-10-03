@@ -1,39 +1,18 @@
 ; gl2.ffi
+; OpenGL 3.3 demonstration using GLFW
 
 $startTime = kernel32.dll u32 GetTickCount()
 
-;#define GL_COLOR_BUFFER_BIT 0x4000
-;#define GL_TRIANGLES        0x0004
-;#define GL_ARRAY_BUFFER     0x8892
-;#define GL_STATIC_DRAW      0x88E4
-;#define GL_VERTEX_SHADER    0x8B31
-;#define GL_FRAGMENT_SHADER  0x8B30
-;#define GL_FLOAT            0x1406
-;#define GL_FALSE            0
-$GL_MULTISAMPLE = i32 0x809D
-$GLFW_SAMPLES = i32 0x00021005
-$GL_COLOR_BUFFER_BIT = i32 0x4000
-$GL_TRIANGLES        = i32 0x0004
-$GL_ARRAY_BUFFER     = i32 0x8892
-$GL_STATIC_DRAW      = i32 0x88E4
-$GL_VERTEX_SHADER    = i32 0x8B31
-$GL_FRAGMENT_SHADER  = i32 0x8B30
-$GL_FLOAT            = i32 0x1406
-$GL_FALSE            = i32 0
+$GL_MULTISAMPLE      = u32 0x809D
+$GLFW_SAMPLES        = i32 0x00021005
+$GL_COLOR_BUFFER_BIT = u32 0x4000
+$GL_TRIANGLES        = u32 0x0004
+$GL_ARRAY_BUFFER     = u32 0x8892
+$GL_STATIC_DRAW      = u32 0x88E4
+$GL_VERTEX_SHADER    = u32 0x8B31
+$GL_FRAGMENT_SHADER  = u32 0x8B30
+$GL_FLOAT            = u32 0x1406
 
-;const char* vertex_shader_src = 
-;    "#version 330 core\n"
-;    "layout (location = 0) in vec2 aPos;\n"
-;    "void main() {\n"
-;    "   gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);\n"
-;    "}";
-;
-;const char* fragment_shader_src = 
-;    "#version 330 core\n"
-;    "out vec4 FragColor;\n"
-;    "void main() {\n"
-;    "   FragColor = vec4(1.0, 0.5, 0.2, 1.0);\n" // Orange color
-;    "}";
 $vertex_shader_src = str "
 #version 330 core
 layout (location = 0) in vec2 aPos;
@@ -48,139 +27,87 @@ void main() {
     FragColor = vec4(1.0, 0.5, 0.2, 1.0);
 }"
 
-;int32_t main(void) {
-;    glfwInit();
-;    w = glfwCreateWindow(640, 480, "Modern Triangle", 0, 0);
-;    glfwMakeContextCurrent(w);
-/loaddll glfw3.dll
-i32 glfwInit()
-void glfwWindowHint(i32 $GLFW_SAMPLES, i32 4)
-$w = voidptr glfwCreateWindow(i32 640, i32 480, str "Modern Triangle", voidptr 0, voidptr 0) --assert=nonzero
-void glfwMakeContextCurrent(voidptr $w)
+assert(glfw3.dll i32 glfwInit() != 0, "glfwInit")
+glfw3.dll void glfwWindowHint(i32 $GLFW_SAMPLES, i32 4)
+$window = glfw3.dll ptr glfwCreateWindow(i32 640, i32 480, str "Modern Triangle", ptr 0, ptr 0)
+assert($window != 0, "glfwCreateWindow")
+glfw3.dll void glfwMakeContextCurrent(ptr $window)
 
-;void load_gl_functions() {
-;    glClear = (PFNGLCLEARPROC)glfwGetProcAddress("glClear");
-;    glDrawArrays = (PFNGLDRAWARRAYSPROC)glfwGetProcAddress("glDrawArrays");
-;    glGenBuffers = (PFNGLGENBUFFERSPROC)glfwGetProcAddress("glGenBuffers");
-;    glBindBuffer = (PFNGLBINDBUFFERPROC)glfwGetProcAddress("glBindBuffer");
-;    glBufferData = (PFNGLBUFFERDATAPROC)glfwGetProcAddress("glBufferData");
-;    glGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC)glfwGetProcAddress("glGenVertexArrays");
-;    glBindVertexArray = (PFNGLBINDVERTEXARRAYPROC)glfwGetProcAddress("glBindVertexArray");
-;    glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)glfwGetProcAddress("glEnableVertexAttribArray");
-;    glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)glfwGetProcAddress("glVertexAttribPointer");
-;    glCreateShader = (PFNGLCREATESHADERPROC)glfwGetProcAddress("glCreateShader");
-;    glShaderSource = (PFNGLSHADERSOURCEPROC)glfwGetProcAddress("glShaderSource");
-;    glCompileShader = (PFNGLCOMPILESHADERPROC)glfwGetProcAddress("glCompileShader");
-;    glCreateProgram = (PFNGLCREATEPROGRAMPROC)glfwGetProcAddress("glCreateProgram");
-;    glAttachShader = (PFNGLATTACHSHADERPROC)glfwGetProcAddress("glAttachShader");
-;    glLinkProgram = (PFNGLLINKPROGRAMPROC)glfwGetProcAddress("glLinkProgram");
-;    glUseProgram = (PFNGLUSEPROGRAMPROC)glfwGetProcAddress("glUseProgram");
-;}
-$glClear = voidptr glfwGetProcAddress(str "glClear") --assert=nonzero
-$glDrawArrays = voidptr glfwGetProcAddress(str "glDrawArrays") --assert=nonzero
-$glGenBuffers = voidptr glfwGetProcAddress(str "glGenBuffers") --assert=nonzero
-$glBindBuffer = voidptr glfwGetProcAddress(str "glBindBuffer") --assert=nonzero
-$glBufferData = voidptr glfwGetProcAddress(str "glBufferData") --assert=nonzero
-$glGenVertexArrays = voidptr glfwGetProcAddress(str "glGenVertexArrays") --assert=nonzero
-$glBindVertexArray = voidptr glfwGetProcAddress(str "glBindVertexArray") --assert=nonzero
-$glEnableVertexAttribArray = voidptr glfwGetProcAddress(str "glEnableVertexAttribArray") --assert=nonzero
-$glVertexAttribPointer = voidptr glfwGetProcAddress(str "glVertexAttribPointer") --assert=nonzero
-$glCreateShader = voidptr glfwGetProcAddress(str "glCreateShader") --assert=nonzero
-$glShaderSource = voidptr glfwGetProcAddress(str "glShaderSource") --assert=nonzero
-$glCompileShader = voidptr glfwGetProcAddress(str "glCompileShader") --assert=nonzero
-$glDeleteShader = voidptr glfwGetProcAddress(str "glDeleteShader") --assert=nonzero
-$glCreateProgram = voidptr glfwGetProcAddress(str "glCreateProgram") --assert=nonzero
-$glAttachShader = voidptr glfwGetProcAddress(str "glAttachShader") --assert=nonzero
-$glLinkProgram = voidptr glfwGetProcAddress(str "glLinkProgram") --assert=nonzero
-$glUseProgram = voidptr glfwGetProcAddress(str "glUseProgram") --assert=nonzero
+$glClear                   = glfw3.dll ptr glfwGetProcAddress(str "glClear")
+$glDrawArrays              = glfw3.dll ptr glfwGetProcAddress(str "glDrawArrays")
+$glGenBuffers              = glfw3.dll ptr glfwGetProcAddress(str "glGenBuffers")
+$glBindBuffer              = glfw3.dll ptr glfwGetProcAddress(str "glBindBuffer")
+$glBufferData              = glfw3.dll ptr glfwGetProcAddress(str "glBufferData")
+$glGenVertexArrays         = glfw3.dll ptr glfwGetProcAddress(str "glGenVertexArrays")
+$glBindVertexArray         = glfw3.dll ptr glfwGetProcAddress(str "glBindVertexArray")
+$glEnableVertexAttribArray = glfw3.dll ptr glfwGetProcAddress(str "glEnableVertexAttribArray")
+$glVertexAttribPointer     = glfw3.dll ptr glfwGetProcAddress(str "glVertexAttribPointer")
+$glCreateShader            = glfw3.dll ptr glfwGetProcAddress(str "glCreateShader")
+$glShaderSource            = glfw3.dll ptr glfwGetProcAddress(str "glShaderSource")
+$glCompileShader           = glfw3.dll ptr glfwGetProcAddress(str "glCompileShader")
+$glDeleteShader            = glfw3.dll ptr glfwGetProcAddress(str "glDeleteShader")
+$glCreateProgram           = glfw3.dll ptr glfwGetProcAddress(str "glCreateProgram")
+$glAttachShader            = glfw3.dll ptr glfwGetProcAddress(str "glAttachShader")
+$glLinkProgram             = glfw3.dll ptr glfwGetProcAddress(str "glLinkProgram")
+$glUseProgram              = glfw3.dll ptr glfwGetProcAddress(str "glUseProgram")
+$glEnable                  = glfw3.dll ptr glfwGetProcAddress(str "glEnable")
 
-$glEnable = voidptr glfwGetProcAddress(str "glEnable") --assert=nonzero
+assert($glClear != 0 && $glDrawArrays != 0 && $glGenBuffers != 0 && $glBindBuffer != 0)
+assert($glBufferData != 0 && $glGenVertexArrays != 0 && $glBindVertexArray != 0)
+assert($glEnableVertexAttribArray != 0 && $glVertexAttribPointer != 0)
+assert($glCreateShader != 0 && $glShaderSource != 0 && $glCompileShader != 0)
+assert($glDeleteShader != 0 && $glCreateProgram != 0 && $glAttachShader != 0)
+assert($glLinkProgram != 0 && $glUseProgram != 0 && $glEnable != 0)
+
 void $glEnable(u32 $GL_MULTISAMPLE)
 
-; main
-;    float vertices[] = {
-;        -0.5f, -0.5f,
-;         0.5f, -0.5f,
-;         0.0f,  0.5f
-;    };
-$vertices = msvcrt.dll voidptr malloc(u64 24) --assert=nonzero
-/set $vertices f32 -0.5
-/set $vertices + 4 f32 -0.5
-/set $vertices + 8 f32 0.5
-/set $vertices + 12 f32 -0.5
-/set $vertices + 16 f32 0.0
-/set $vertices + 20 f32 0.5
+$vertices = f32[6] {
+    -0.5, -0.5,
+     0.5, -0.5,
+     0.0,  0.5
+}
 
-;    unsigned int VBO, VAO;
-;    glGenVertexArrays(1, &VAO);
-;    glGenBuffers(1, &VBO);
 $VAO = u32 0
 $VBO = u32 0
-void $glGenVertexArrays(i32 1, voidptr &$VAO)
-void $glGenBuffers(i32 1, voidptr &$VBO)
-
-;    glBindVertexArray(VAO);
-;    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-;    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+void $glGenVertexArrays(i32 1, ptr &$VAO)
+void $glGenBuffers(i32 1, ptr &$VBO)
 void $glBindVertexArray(u32 $VAO)
 void $glBindBuffer(u32 $GL_ARRAY_BUFFER, u32 $VBO)
-void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STATIC_DRAW)
-
-;    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-;    glEnableVertexAttribArray(0);
-void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, voidptr 0)
+void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 sizeof($vertices), ptr &$vertices, u32 $GL_STATIC_DRAW)
+void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, ptr 0)
 void $glEnableVertexAttribArray(u32 0)
 
-;    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-;    glShaderSource(vertexShader, 1, &vertex_shader_src, 0);
-;    glCompileShader(vertexShader);
-$vertexShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
-void $glShaderSource(u32 $vertexShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
+$vertexShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER)
+assert($vertexShader != 0, "glCreateShader vertex")
+void $glShaderSource(u32 $vertexShader, i32 1, ptr &$vertex_shader_src, ptr 0)
 void $glCompileShader(u32 $vertexShader)
 
-;    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-;    glShaderSource(fragmentShader, 1, &fragment_shader_src, 0);
-;    glCompileShader(fragmentShader);
-$fragmentShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
-void $glShaderSource(u32 $fragmentShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
+$fragmentShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER)
+assert($fragmentShader != 0, "glCreateShader fragment")
+void $glShaderSource(u32 $fragmentShader, i32 1, ptr &$fragment_shader_src, ptr 0)
 void $glCompileShader(u32 $fragmentShader)
 
-;    unsigned int shaderProgram = glCreateProgram();
-;    glAttachShader(shaderProgram, vertexShader);
-;    glAttachShader(shaderProgram, fragmentShader);
-;    glLinkProgram(shaderProgram);
-$prog = u32 $glCreateProgram()
-void $glAttachShader(u32 $prog, u32 $vertexShader)
-void $glAttachShader(u32 $prog, u32 $fragmentShader)
-void $glLinkProgram(u32 $prog)
-
-;    glDeleteShader(vertexShader);
-;    glDeleteShader(fragmentShader);
+$program = u32 $glCreateProgram()
+assert($program != 0, "glCreateProgram")
+void $glAttachShader(u32 $program, u32 $vertexShader)
+void $glAttachShader(u32 $program, u32 $fragmentShader)
+void $glLinkProgram(u32 $program)
 void $glDeleteShader(u32 $vertexShader)
 void $glDeleteShader(u32 $fragmentShader)
 
-; timing
 $endTime = kernel32.dll u32 GetTickCount()
-$elapsedTime = i64 $endTime - $startTime
+$elapsedTime = i64 (i64 $endTime - i64 $startTime)
 msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime)
 
-;    while (!glfwWindowShouldClose(w)) {
-;        glClear(GL_COLOR_BUFFER_BIT);
-;        glUseProgram(shaderProgram);
-;        glBindVertexArray(VAO);
-;        glDrawArrays(GL_TRIANGLES, 0, 3);
-;        glfwSwapBuffers(w);
-;        glfwPollEvents();
-;    }
-/repeat { i32 glfwWindowShouldClose(voidptr $w) --assert=zero,
-    void $glClear(u32 $GL_COLOR_BUFFER_BIT),
-    void $glUseProgram(u32 $prog),
-    void $glBindVertexArray(u32 $VAO),
-    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
-    void glfwSwapBuffers(voidptr $w),
-    void glfwPollEvents() }
+while (glfw3.dll i32 glfwWindowShouldClose(ptr $window) == 0) {
+    void $glClear(u32 $GL_COLOR_BUFFER_BIT)
+    void $glUseProgram(u32 $program)
+    void $glBindVertexArray(u32 $VAO)
+    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3)
+    glfw3.dll void glfwSwapBuffers(ptr $window)
+    glfw3.dll void glfwPollEvents()
+}
 
-; cleanup
-msvcrt.dll void free(voidptr $vertices)
+glfw3.dll void glfwDestroyWindow(ptr $window)
+glfw3.dll void glfwTerminate()
 msvcrt.dll i32 printf(str "goodbye!\n")
-/quit

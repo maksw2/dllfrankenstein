@@ -1,93 +1,161 @@
 ; gl3.ffi
+; OpenGL 3.3 demonstration using native Win32 API
+
+struct WNDCLASSA {
+    u32 style,
+    ptr lpfnWndProc,
+    i32 cbClsExtra,
+    i32 cbWndExtra,
+    ptr hInstance,
+    ptr hIcon,
+    ptr hCursor,
+    ptr hbrBackground,
+    ptr lpszMenuName,
+    str lpszClassName,
+}
+
+struct POINT {
+    i32 x,
+    i32 y,
+}
+
+struct MSG {
+    ptr hwnd,
+    u32 message,
+    u64 wParam,
+    i64 lParam,
+    u32 time,
+    POINT pt,
+    u32 lPrivate,
+}
+
+struct PIXELFORMATDESCRIPTOR {
+    u16 nSize,
+    u16 nVersion,
+    u32 dwFlags,
+    u8 iPixelType,
+    u8 cColorBits,
+    u8 cRedBits,
+    u8 cRedShift,
+    u8 cGreenBits,
+    u8 cGreenShift,
+    u8 cBlueBits,
+    u8 cBlueShift,
+    u8 cAlphaBits,
+    u8 cAlphaShift,
+    u8 cAccumBits,
+    u8 cAccumRedBits,
+    u8 cAccumGreenBits,
+    u8 cAccumBlueBits,
+    u8 cAccumAlphaBits,
+    u8 cDepthBits,
+    u8 cStencilBits,
+    u8 cAuxBuffers,
+    u8 iLayerType,
+    u8 bReserved,
+    u32 dwLayerMask,
+    u32 dwVisibleMask,
+    u32 dwDamageMask,
+}
+
+i64 WindowProc(ptr $hwnd, u32 $msg, u64 $wparam, i64 $lparam) {
+    if ($msg == 2) {
+        user32.dll void PostQuitMessage(i32 0)
+        return 0
+    }
+    return user32.dll i64 DefWindowProcA(ptr $hwnd, u32 $msg, u64 $wparam, i64 $lparam)
+}
 
 $startTime = kernel32.dll u32 GetTickCount()
+$GL_COLOR_BUFFER_BIT = u32 0x4000
+$GL_TRIANGLES        = u32 0x0004
+$GL_ARRAY_BUFFER     = u32 0x8892
+$GL_STATIC_DRAW      = u32 0x88E4
+$GL_VERTEX_SHADER    = u32 0x8B31
+$GL_FRAGMENT_SHADER  = u32 0x8B30
+$GL_FLOAT            = u32 0x1406
 
-$PFD_TYPE_RGBA       = i8 0
-$GL_COLOR_BUFFER_BIT = i32 0x4000
-$GL_TRIANGLES        = i32 0x0004
-$GL_ARRAY_BUFFER     = i32 0x8892
-$GL_STATIC_DRAW      = i32 0x88E4
-$GL_VERTEX_SHADER    = i32 0x8B31
-$GL_FRAGMENT_SHADER  = i32 0x8B30
+$instance = kernel32.dll ptr GetModuleHandleA(ptr 0)
+assert($instance != 0, "GetModuleHandleA")
+$cursor = user32.dll ptr LoadCursorA(ptr 0, i64 32512)
+$class_name = str "NativeGLClass"
 
-$lpfnWndProc = /address test.dll GenericWindowProcA
+$wc = WNDCLASSA {
+    .style = 0x20,
+    .lpfnWndProc = &WindowProc,
+    .hInstance = $instance,
+    .hCursor = $cursor,
+    .hbrBackground = ptr 6,
+    .lpszClassName = $class_name
+}
 
-$hInstance = kernel32.dll voidptr GetModuleHandleA(i64 0)
-$lpszClassName = str "NativeGLClass"
-$hCursor = user32.dll voidptr LoadCursorA(voidptr 0, i64 32512)
+assert(user32.dll u16 RegisterClassA(ptr &$wc) != 0, "RegisterClassA")
+$window = user32.dll ptr CreateWindowExA(
+    u32 0, str $class_name, str "Mann Up GL", u32 0x10CF0000,
+    i32 100, i32 100, i32 640, i32 480,
+    ptr 0, ptr 0, ptr $instance, ptr 0
+)
+assert($window != 0, "CreateWindowExA")
 
-$wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc,
- i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon,
- $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground,
- voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName } --quiet
+$dc = user32.dll ptr GetDC(ptr $window)
+assert($dc != 0, "GetDC")
 
-$wc = msvcrt.dll voidptr malloc(u64 $wc_size) --assert=nonzero
-msvcrt.dll voidptr memset(voidptr $wc, i32 0, u64 $wc_size)
+$pfd = PIXELFORMATDESCRIPTOR {
+    .nSize = sizeof(PIXELFORMATDESCRIPTOR),
+    .nVersion = 1,
+    .dwFlags = 0x25,
+    .iPixelType = 0,
+    .cColorBits = 32,
+    .cDepthBits = 24,
+    .cStencilBits = 8,
+    .iLayerType = 0
+}
 
-/set $wc + $style_off u32 0x20
-/set $wc + $lpfnWndProc_off voidptr $lpfnWndProc
-/set $wc + $hInstance_off voidptr $hInstance
-/set $wc + $hCursor_off voidptr $hCursor
-/set $wc + $hbrBackground_off voidptr 6
-/set $wc + $lpszClassName_off voidptr $lpszClassName
+$pixelFormat = gdi32.dll i32 ChoosePixelFormat(ptr $dc, ptr &$pfd)
+assert($pixelFormat != 0, "ChoosePixelFormat")
+assert(gdi32.dll i32 SetPixelFormat(ptr $dc, i32 $pixelFormat, ptr &$pfd) != 0, "SetPixelFormat")
 
-user32.dll u16 RegisterClassA(voidptr $wc) --assert=nonzero
+$rc = opengl32.dll ptr wglCreateContext(ptr $dc)
+assert($rc != 0, "wglCreateContext")
+assert(opengl32.dll i32 wglMakeCurrent(ptr $dc, ptr $rc) != 0, "wglMakeCurrent")
 
-$hWnd = user32.dll voidptr CreateWindowExA(u32 0, voidptr $lpszClassName, str "Mann Up GL", u32 0x10CF0000,
- i32 100, i32 100, i32 640, i32 480, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --assert=nonzero
+$glGenBuffers              = opengl32.dll ptr wglGetProcAddress(str "glGenBuffers")
+$glBindBuffer              = opengl32.dll ptr wglGetProcAddress(str "glBindBuffer")
+$glBufferData              = opengl32.dll ptr wglGetProcAddress(str "glBufferData")
+$glGenVertexArrays         = opengl32.dll ptr wglGetProcAddress(str "glGenVertexArrays")
+$glBindVertexArray         = opengl32.dll ptr wglGetProcAddress(str "glBindVertexArray")
+$glEnableVertexAttribArray = opengl32.dll ptr wglGetProcAddress(str "glEnableVertexAttribArray")
+$glVertexAttribPointer     = opengl32.dll ptr wglGetProcAddress(str "glVertexAttribPointer")
+$glCreateShader            = opengl32.dll ptr wglGetProcAddress(str "glCreateShader")
+$glShaderSource            = opengl32.dll ptr wglGetProcAddress(str "glShaderSource")
+$glCompileShader           = opengl32.dll ptr wglGetProcAddress(str "glCompileShader")
+$glCreateProgram           = opengl32.dll ptr wglGetProcAddress(str "glCreateProgram")
+$glAttachShader            = opengl32.dll ptr wglGetProcAddress(str "glAttachShader")
+$glLinkProgram             = opengl32.dll ptr wglGetProcAddress(str "glLinkProgram")
+$glUseProgram              = opengl32.dll ptr wglGetProcAddress(str "glUseProgram")
 
-$hDC = user32.dll voidptr GetDC(voidptr $hWnd) --assert=nonzero
+assert($glGenBuffers != 0 && $glBindBuffer != 0 && $glBufferData != 0)
+assert($glGenVertexArrays != 0 && $glBindVertexArray != 0)
+assert($glEnableVertexAttribArray != 0 && $glVertexAttribPointer != 0)
+assert($glCreateShader != 0 && $glShaderSource != 0 && $glCompileShader != 0)
+assert($glCreateProgram != 0 && $glAttachShader != 0 && $glLinkProgram != 0 && $glUseProgram != 0)
 
-$pfd = msvcrt.dll voidptr malloc(u64 40) --assert=nonzero
-msvcrt.dll voidptr memset(voidptr $pfd, i32 0, u64 40)
-/set $pfd + 0 i16 40 ; nSize
-/set $pfd + 2 i16 1  ; nVersion
-/set $pfd + 4 u32 37 ; dwFlags (DRAW_TO_WINDOW | SUPPORT_OPENGL | DOUBLEBUFFER)
-/set $pfd + 8 i8  0  ; iPixelType (RGBA)
-/set $pfd + 9 i8  32 ; cColorBits
-
-$pixelFormat = gdi32.dll i32 ChoosePixelFormat(voidptr $hDC, voidptr $pfd) --assert=nonzero
-gdi32.dll i32 SetPixelFormat(voidptr $hDC, i32 $pixelFormat, voidptr $pfd) --assert=nonzero
-
-$hRC = opengl32.dll voidptr wglCreateContext(voidptr $hDC) --assert=nonzero
-opengl32.dll i32 wglMakeCurrent(voidptr $hDC, voidptr $hRC) --assert=nonzero
-
-$wglGetProcAddress = /address opengl32.dll wglGetProcAddress
-
-$glGenBuffers      = voidptr $wglGetProcAddress(str "glGenBuffers") --assert=nonzero
-$glBindBuffer      = voidptr $wglGetProcAddress(str "glBindBuffer") --assert=nonzero
-$glBufferData      = voidptr $wglGetProcAddress(str "glBufferData") --assert=nonzero
-$glGenVertexArrays = voidptr $wglGetProcAddress(str "glGenVertexArrays") --assert=nonzero
-$glBindVertexArray = voidptr $wglGetProcAddress(str "glBindVertexArray") --assert=nonzero
-$glEnableVertexAttribArray = voidptr $wglGetProcAddress(str "glEnableVertexAttribArray") --assert=nonzero
-$glVertexAttribPointer     = voidptr $wglGetProcAddress(str "glVertexAttribPointer") --assert=nonzero
-$glCreateShader    = voidptr $wglGetProcAddress(str "glCreateShader") --assert=nonzero
-$glShaderSource    = voidptr $wglGetProcAddress(str "glShaderSource") --assert=nonzero
-$glCompileShader   = voidptr $wglGetProcAddress(str "glCompileShader") --assert=nonzero
-$glCreateProgram   = voidptr $wglGetProcAddress(str "glCreateProgram") --assert=nonzero
-$glAttachShader    = voidptr $wglGetProcAddress(str "glAttachShader") --assert=nonzero
-$glLinkProgram     = voidptr $wglGetProcAddress(str "glLinkProgram") --assert=nonzero
-$glUseProgram      = voidptr $wglGetProcAddress(str "glUseProgram") --assert=nonzero
-
-$vertices = msvcrt.dll voidptr malloc(u64 24) --assert=nonzero
-/set $vertices    f32 -0.5
-/set $vertices+4  f32 -0.5
-/set $vertices+8  f32  0.5
-/set $vertices+12 f32 -0.5
-/set $vertices+16 f32  0.0
-/set $vertices+20 f32  0.5
+$vertices = f32[6] {
+    -0.5, -0.5,
+     0.5, -0.5,
+     0.0,  0.5
+}
 
 $VAO = u32 0
 $VBO = u32 0
-void $glGenVertexArrays(i32 1, voidptr &$VAO)
-void $glGenBuffers(i32 1, voidptr &$VBO)
+void $glGenVertexArrays(i32 1, ptr &$VAO)
+void $glGenBuffers(i32 1, ptr &$VBO)
 void $glBindVertexArray(u32 $VAO)
 void $glBindBuffer(u32 $GL_ARRAY_BUFFER, u32 $VBO)
-void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STATIC_DRAW)
-void $glVertexAttribPointer(u32 0, i32 2, i32 0x1406, i8 0, i32 8, voidptr 0)
+void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 sizeof($vertices), ptr &$vertices, u32 $GL_STATIC_DRAW)
+void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, ptr 0)
 void $glEnableVertexAttribArray(u32 0)
 
-; raw string literal
 $vertex_src = str "
 #version 330 core
 layout (location = 0) in vec2 aPos;
@@ -95,7 +163,6 @@ void main() {
     gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
 }"
 
-; string concatenation
 $fragment_src = str
     "#version 330 core\n"
     "out vec4 FragColor;\n"
@@ -103,40 +170,34 @@ $fragment_src = str
 
 $vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER)
 $fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER)
-
-void $glShaderSource(u32 $vShader, i32 1, voidptr &$vertex_src, voidptr 0)
+assert($vShader != 0 && $fShader != 0, "glCreateShader")
+void $glShaderSource(u32 $vShader, i32 1, ptr &$vertex_src, ptr 0)
 void $glCompileShader(u32 $vShader)
-void $glShaderSource(u32 $fShader, i32 1, voidptr &$fragment_src, voidptr 0)
+void $glShaderSource(u32 $fShader, i32 1, ptr &$fragment_src, ptr 0)
 void $glCompileShader(u32 $fShader)
 
-$prog = u32 $glCreateProgram()
-void $glAttachShader(u32 $prog, u32 $vShader)
-void $glAttachShader(u32 $prog, u32 $fShader)
-void $glLinkProgram(u32 $prog)
+$program = u32 $glCreateProgram()
+assert($program != 0, "glCreateProgram")
+void $glAttachShader(u32 $program, u32 $vShader)
+void $glAttachShader(u32 $program, u32 $fShader)
+void $glLinkProgram(u32 $program)
 
-$MSG_size = /struct { voidptr hwnd, u32 message, u64 wParam, i64 lParam, u32 time, { i32 x, i32 y } pt } --quiet
-
-$msg = msvcrt.dll voidptr malloc(u64 $MSG_size) --assert=nonzero
-msvcrt.dll voidptr memset(voidptr $msg, i32 0, u64 $MSG_size)
-
-; timing
 $endTime = kernel32.dll u32 GetTickCount()
-$elapsedTime = i64 $endTime - $startTime
+$elapsedTime = i64 (i64 $endTime - i64 $startTime)
 msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime)
 
-; *in an ideal world* we would use PeekMessage and shit but we don't have branching
-; good enough™
-/repeat {
-    user32.dll i32 GetMessageA(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,
-    user32.dll i32 TranslateMessage(voidptr $msg),
-    user32.dll i64 DispatchMessageA(voidptr $msg),
-    opengl32.dll void glClear(u32 $GL_COLOR_BUFFER_BIT),
-    void $glUseProgram(u32 $prog),
-    void $glBindVertexArray(u32 $VAO),
-    opengl32.dll void glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
-    gdi32.dll i32 SwapBuffers(voidptr $hDC) }
+$msg = MSG {}
+while (user32.dll i32 GetMessageA(ptr &$msg, ptr 0, u32 0, u32 0) > 0) {
+    user32.dll i32 TranslateMessage(ptr &$msg)
+    user32.dll i64 DispatchMessageA(ptr &$msg)
+    opengl32.dll void glClear(u32 $GL_COLOR_BUFFER_BIT)
+    void $glUseProgram(u32 $program)
+    void $glBindVertexArray(u32 $VAO)
+    opengl32.dll void glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3)
+    gdi32.dll i32 SwapBuffers(ptr $dc)
+}
 
-; cleanup
-msvcrt.dll void free(voidptr $vertices)
+opengl32.dll i32 wglMakeCurrent(ptr 0, ptr 0)
+opengl32.dll i32 wglDeleteContext(ptr $rc)
+user32.dll i32 ReleaseDC(ptr $window, ptr $dc)
 msvcrt.dll i32 printf(str "goodbye!\n")
-/quit

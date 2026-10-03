@@ -1,200 +1,136 @@
 ; http.ffi
-; "cool" - GuestSneezePlays
-; "ok" - YourLocalMoon
-; "it works!" - maksw
+; Tiny single-threaded static file server. Run from examples/ and open localhost:8080.
 
-$AF_INET = i32 2
-$SOCK_STREAM = i32 1
-$IPPROTO_TCP = i32 6
-$MEM_COMMIT = u32 0x1000
-$MEM_RELEASE = u32 0x8000
-$PAGE_READWRITE = i32 0x04
-$GENERIC_READ = i32 0x80000000
-$OPEN_EXISTING = i32 3
+struct SOCKADDR_IN {
+    u16 sin_family,
+    u16 sin_port,
+    u32 sin_addr,
+    u8 sin_zero[8],
+}
+
+$AF_INET       = i32 2
+$SOCK_STREAM   = i32 1
+$IPPROTO_TCP   = i32 6
+$GENERIC_READ  = u32 0x80000000
+$OPEN_EXISTING = u32 3
+$MEM_COMMIT    = u32 0x1000
+$MEM_RESERVE   = u32 0x2000
+$MEM_RELEASE   = u32 0x8000
+$PAGE_READWRITE = u32 0x04
 $port = u16 8080
 
-$raw_sockaddr_in_size = /struct { $sin_family_off = u16 sin_family, $sin_port_off = u16 sin_port, $sin_addr_off = u32 sin_addr, u64 sin_zero }
+$wsa = msvcrt.dll ptr malloc(u64 4096)
+$req_buf = msvcrt.dll ptr malloc(u64 32768)
+$head_buf = msvcrt.dll ptr malloc(u64 2048)
+assert($wsa != 0 && $req_buf != 0 && $head_buf != 0, "server buffers")
 
-$wsa = msvcrt.dll voidptr malloc(u64 4096) --assert=nonzero
-$addr = msvcrt.dll voidptr malloc(u64 $raw_sockaddr_in_size) --assert=nonzero
-$req_buf = msvcrt.dll voidptr malloc(u64 32768) --assert=nonzero
+assert(ws2_32.dll i32 WSAStartup(u16 0x0202, ptr $wsa) == 0, "WSAStartup")
+$server_socket = ws2_32.dll u64 socket(i32 $AF_INET, i32 $SOCK_STREAM, i32 $IPPROTO_TCP)
+assert($server_socket != 0xFFFFFFFFFFFFFFFF, "socket")
 
-; --- STRINGS SETUP ---
-$ext_html = str ".html"
-$ext_js   = str ".js"
-$ext_css  = str ".css"
-$ext_jpg  = str ".jpg"
-$ext_jpeg = str ".jpeg"
-$ext_png  = str ".png"
-$ext_txt  = str ".txt"
-$ext_ico  = str ".ico"
+$addr = SOCKADDR_IN {
+    .sin_family = u16 $AF_INET,
+    .sin_port = ws2_32.dll u16 htons(u16 $port),
+    .sin_addr = 0
+}
+
+assert(ws2_32.dll i32 bind(u64 $server_socket, ptr &$addr, i32 sizeof(SOCKADDR_IN)) == 0, "bind")
+assert(ws2_32.dll i32 listen(u64 $server_socket, i32 10) == 0, "listen")
+msvcrt.dll i32 printf(str "server started on http://localhost:%hu\n", u16 $port)
 
 $mime_html = str "text/html"
 $mime_js   = str "application/javascript"
 $mime_css  = str "text/css"
 $mime_jpg  = str "image/jpeg"
-$mime_jpeg = str "image/jpeg"
 $mime_png  = str "image/png"
 $mime_txt  = str "text/plain"
 $mime_ico  = str "image/x-icon"
 $mime_def  = str "application/octet-stream"
 
-/loaddll ws2_32.dll
-i32 WSAStartup(u16 0x0202, voidptr $wsa) --assert=zero
+while (1) {
+    $client_socket = ws2_32.dll u64 accept(u64 $server_socket, ptr 0, ptr 0)
+    if ($client_socket == 0xFFFFFFFFFFFFFFFF) {
+        continue
+    }
 
-$server_socket = u64 socket(i32 $AF_INET, i32 $SOCK_STREAM, i32 $IPPROTO_TCP)
+    $received = ws2_32.dll i32 recv(u64 $client_socket, ptr $req_buf, i32 32767, i32 0)
+    if ($received <= 0) {
+        ws2_32.dll i32 closesocket(u64 $client_socket)
+        continue
+    }
 
-/set $addr + $sin_family_off u16 $AF_INET
-$sin_port  = u16 htons(u16 $port)
-/set $addr + $sin_port_off u16 $sin_port
-/set $addr + $sin_addr_off u32 0
+    u8 *($req_buf + $received) = 0
 
-i32 bind(u64 $server_socket, voidptr $addr, i32 16) --assert=zero
-i32 listen(u64 $server_socket, i32 10) --assert=zero
+    ; Request starts with "GET /". strtok terminates the path at the following space.
+    $filename = $req_buf + 5
+    msvcrt.dll ptr strtok(ptr $filename, str " ")
 
-$head200_buf = msvcrt.dll voidptr malloc(u64 2048) --assert=nonzero
-$head404_buf = msvcrt.dll voidptr malloc(u64 2048) --assert=nonzero
-$tmp_buf     = msvcrt.dll voidptr malloc(u64 128)  --assert=nonzero
+    $unsafe_parent = msvcrt.dll ptr strstr(ptr $filename, str "..")
+    $unsafe_colon  = msvcrt.dll ptr strstr(ptr $filename, str ":")
+    $unsafe_slash  = msvcrt.dll ptr strstr(ptr $filename, str "\\")
+    if ($unsafe_parent != 0 || $unsafe_colon != 0 || $unsafe_slash != 0) {
+        $header_len = msvcrt.dll i32 sprintf(ptr $head_buf, str "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        ws2_32.dll i32 send(u64 $client_socket, ptr $head_buf, i32 $header_len, i32 0)
+        ws2_32.dll i32 closesocket(u64 $client_socket)
+        continue
+    }
 
-msvcrt.dll i32 printf(str "server started on %hu\n", u16 $port)
+    ; A bare / serves index.html.
+    if (msvcrt.dll i32 strcmp(ptr $filename, str "") == 0) {
+        $filename = ptr "index.html"
+    }
 
-/repeat {
-    $client_socket = u64 accept(u64 $server_socket, voidptr 0, voidptr 0)
+    $file = kernel32.dll ptr CreateFileA(ptr $filename, u32 $GENERIC_READ, u32 1, ptr 0, u32 $OPEN_EXISTING, u32 0, ptr 0)
+    if ($file == 0xFFFFFFFFFFFFFFFF) {
+        $header_len = msvcrt.dll i32 sprintf(ptr $head_buf, str "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        ws2_32.dll i32 send(u64 $client_socket, ptr $head_buf, i32 $header_len, i32 0)
+        ws2_32.dll i32 closesocket(u64 $client_socket)
+        continue
+    }
 
-    $received = i32 recv(u64 $client_socket, voidptr $req_buf, i32 4096, i32 0)
-    /set $req_buf + $received u8 0
+    $mime = $mime_def
+    $ext = msvcrt.dll ptr strrchr(ptr $filename, i32 46)
+    if ($ext != 0) {
+        if (msvcrt.dll i32 _stricmp(ptr $ext, str ".html") == 0) {
+            $mime = $mime_html
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".htm") == 0) {
+            $mime = $mime_html
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".js") == 0) {
+            $mime = $mime_js
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".css") == 0) {
+            $mime = $mime_css
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".jpg") == 0) {
+            $mime = $mime_jpg
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".jpeg") == 0) {
+            $mime = $mime_jpg
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".png") == 0) {
+            $mime = $mime_png
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".txt") == 0) {
+            $mime = $mime_txt
+        } else if (msvcrt.dll i32 _stricmp(ptr $ext, str ".ico") == 0) {
+            $mime = $mime_ico
+        }
+    }
 
-    $filename_ptr = voidptr $req_buf + 5
-    $token = msvcrt.dll voidptr strtok(voidptr $filename_ptr, str " ")
+    $file_size = kernel32.dll u32 GetFileSize(ptr $file, ptr 0)
+    $header_len = msvcrt.dll i32 sprintf(
+        ptr $head_buf,
+        str "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
+        str $mime,
+        u32 $file_size
+    )
+    ws2_32.dll i32 send(u64 $client_socket, ptr $head_buf, i32 $header_len, i32 0)
 
-    $hFile = kernel32.dll voidptr CreateFileA(voidptr $filename_ptr, u32 $GENERIC_READ, u32 0, voidptr 0, u32 $OPEN_EXISTING, u32 0, voidptr 0)
+    if ($file_size != 0) {
+        $file_mem = kernel32.dll ptr VirtualAlloc(ptr 0, u64 $file_size, u32 $MEM_COMMIT | $MEM_RESERVE, u32 $PAGE_READWRITE)
+        assert($file_mem != 0, "VirtualAlloc file")
+        $bytes_read = u32 0
+        assert(kernel32.dll i32 ReadFile(ptr $file, ptr $file_mem, u32 $file_size, ptr &$bytes_read, ptr 0) != 0, "ReadFile")
+        ws2_32.dll i32 send(u64 $client_socket, ptr $file_mem, i32 $bytes_read, i32 0)
+        kernel32.dll i32 VirtualFree(ptr $file_mem, u64 0, u32 $MEM_RELEASE)
+    }
 
-    $ptr_dot = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str "..")
-    $ptr_colon = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str ":")
-    $ptr_back = msvcrt.dll voidptr strstr(voidptr $filename_ptr, str "\\")
-
-    $unsafe = u64 $ptr_dot | $ptr_colon
-    $unsafe = u64 $unsafe | $ptr_back
-    
-    $unsafe_i = i64 $unsafe
-    $u_or = i64 $unsafe_i | -$unsafe_i
-    $u_shift = i64 $u_or >> 63
-    $u_mask = i64 $u_shift | -$u_shift
-    $safety_bool = i64 (~$u_mask) & 1
-
-    ; Check if file exists
-    $neg = i64 -($hFile ^ 0xFFFFFFFFFFFFFFFF)
-    $or = u64 ($hFile ^ 0xFFFFFFFFFFFFFFFF) | $neg
-    $or_i = i64 $or
-    $file_exists_bool = i64 (($or_i >> 63) | -($or_i >> 63)) & 1
-    
-    $mask_bool = $file_exists_bool & $safety_bool
-    $inv_mask_bool = i64 1 - $mask_bool
-
-    ; Find extension
-    $dot_ptr = msvcrt.dll voidptr strrchr(voidptr $filename_ptr, i32 46)
-
-    ; Handle NULL dot_ptr
-    $d_shift = i64 ($dot_ptr | -$dot_ptr) >> 63
-    $safe_dot = u64 ($dot_ptr & ($d_shift | -$d_shift)) | ( ~($d_shift | -$d_shift) )
-
-    ; Compare and Build Masks
-    ; We want -1 if Match (0), 0 if Diff.
-
-    ; HTML
-    $d_html   = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_html)
-    $dh_shift = i64 ( ($d_html) | (-$d_html) ) >> 63
-    $m_html   = i64 ~( ($dh_shift) | (-$dh_shift) )
-
-    ; JS
-    $d_js     = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_js)
-    $dj_shift = i64 ( ($d_js) | (-$d_js) ) >> 63
-    $m_js     = i64 ~( ($dj_shift) | (-$dj_shift) )
-
-    ; CSS
-    $d_css    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_css)
-    $dc_shift = i64 ( ($d_css) | (-$d_css) ) >> 63
-    $m_css    = i64 ~( ($dc_shift) | (-$dc_shift) )
-
-    ; JPG
-    $d_jpg    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpg)
-    $djg_shift = i64 ( ($d_jpg) | (-$d_jpg) ) >> 63
-    $m_jpg    = i64 ~( ($djg_shift) | (-$djg_shift) )
-
-    ; JPEG
-    $d_jpeg   = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_jpeg)
-    $dje_shift = i64 ( ($d_jpeg) | (-$d_jpeg) ) >> 63
-    $m_jpeg   = i64 ~( ($dje_shift) | (-$dje_shift) )
-
-    ; PNG
-    $d_png    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_png)
-    $dp_shift = i64 ( ($d_png) | (-$d_png) ) >> 63
-    $m_png    = i64 ~( ($dp_shift) | (-$dp_shift) )
-
-    ; TXT
-    $d_txt    = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_txt)
-    $dt_shift = i64 ( ($d_txt) | (-$d_txt) ) >> 63
-    $m_txt    = i64 ~( ($dt_shift) | (-$dt_shift) )
-
-    ; ICO
-    $d_ico  = msvcrt.dll i32 _stricmp(voidptr $safe_dot, voidptr $ext_ico)
-    $di_shift = i64 ( ($d_ico) | (-$d_ico) ) >> 63
-    $m_ico = i64 ~( ($di_shift) | (-$di_shift) )
-
-    ; Calculate Default Mask
-    $any_match = i64 $m_html | $m_js
-    $any_match = i64 $any_match | $m_css
-    $any_match = i64 $any_match | $m_jpg
-    $any_match = i64 $any_match | $m_jpeg
-    $any_match = i64 $any_match | $m_png
-    $any_match = i64 $any_match | $m_txt
-    $any_match = i64 $any_match | $m_ico
-    $m_def     = i64 ~$any_match
-
-    ; Select String (Bitwise Multiplexer)
-    $sel_mime = u64 $mime_html & $m_html
-    $sel_mime = u64 $sel_mime | ($mime_js & $m_js)
-    $sel_mime = u64 $sel_mime | ($mime_css & $m_css)
-    $sel_mime = u64 $sel_mime | ($mime_jpg & $m_jpg)
-    $sel_mime = u64 $sel_mime | ($mime_jpeg & $m_jpeg)
-    $sel_mime = u64 $sel_mime | ($mime_png & $m_png)
-    $sel_mime = u64 $sel_mime | ($mime_txt & $m_txt)
-    $sel_mime = u64 $sel_mime | ($mime_ico & $m_ico)
-    $sel_mime = u64 $sel_mime | ($mime_def & $m_def)
-
-    msvcrt.dll i32 printf(str "req file: %s, req mime: %s\n", voidptr $filename_ptr, voidptr $sel_mime)
-
-    msvcrt.dll i32 sprintf(voidptr $head404_buf, str "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n")
-    $len404 = msvcrt.dll i32 sprintf(voidptr $tmp_buf, str "%s", voidptr $head404_buf)
-
-    $fileSize = kernel32.dll u32 GetFileSize(voidptr $hFile, voidptr 0)
-    $mask_u32 = u32 $mask_bool
-    $fileSize_masked = u32 $fileSize * $mask_u32
-
-    $header_len = msvcrt.dll i32 sprintf(voidptr $head200_buf, str "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n", voidptr $sel_mime, u32 $fileSize_masked)
-
-    $send_len200 = i32 $header_len * $mask_u32
-    $send_len404 = i32 $len404 * $inv_mask_bool
-
-    i32 send(u64 $client_socket, voidptr $head200_buf, i32 $send_len200, i32 0)
-    i32 send(u64 $client_socket, voidptr $head404_buf, i32 $send_len404, i32 0)
-
-    $fileMem = kernel32.dll voidptr VirtualAlloc(voidptr 0, u64 $fileSize_masked, u32 $MEM_COMMIT, u32 $PAGE_READWRITE)
-    $bytesRead = u32 0
-    kernel32.dll i32 ReadFile(voidptr $hFile, voidptr $fileMem, u32 $fileSize_masked, voidptr &$bytesRead, voidptr 0)
-    i32 send(u64 $client_socket, voidptr $fileMem, i32 $fileSize_masked, i32 0)
-
-    kernel32.dll i32 CloseHandle(voidptr $hFile)
-    kernel32.dll i32 VirtualFree(voidptr $fileMem, u64 0, u32 $MEM_RELEASE)
-    i32 closesocket(u64 $client_socket)
+    msvcrt.dll i32 printf(str "200 %s (%u bytes, %s)\n", ptr $filename, u32 $file_size, str $mime)
+    kernel32.dll i32 CloseHandle(ptr $file)
+    ws2_32.dll i32 closesocket(u64 $client_socket)
 }
-
-msvcrt.dll void free(voidptr $wsa)
-msvcrt.dll void free(voidptr $addr)
-msvcrt.dll void free(voidptr $req_buf)
-msvcrt.dll void free(voidptr $head200_buf)
-msvcrt.dll void free(voidptr $head404_buf)
-msvcrt.dll void free(voidptr $tmp_buf)
-
-msvcrt.dll i32 printf(str "goodbye!\n")
-/quit

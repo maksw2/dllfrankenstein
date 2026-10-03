@@ -1,31 +1,29 @@
 ; gl4.ffi
+; OpenGL 3.3 demonstration using GLFW with movement
 
 $startTime = kernel32.dll u32 GetTickCount()
 
-; OpenGL Constants
-$GL_COLOR_BUFFER_BIT = i32 0x4000
-$GL_TRIANGLES        = i32 0x0004
-$GL_ARRAY_BUFFER     = i32 0x8892
-$GL_STATIC_DRAW      = i32 0x88E4
-$GL_VERTEX_SHADER    = i32 0x8B31
-$GL_FRAGMENT_SHADER  = i32 0x8B30
-$GL_FLOAT            = i32 0x1406
-$GL_FALSE            = i32 0
-$GL_INFO_LOG_LENGTH  = i32 0x8B84
+$GL_COLOR_BUFFER_BIT = u32 0x4000
+$GL_TRIANGLES        = u32 0x0004
+$GL_ARRAY_BUFFER     = u32 0x8892
+$GL_STATIC_DRAW      = u32 0x88E4
+$GL_VERTEX_SHADER    = u32 0x8B31
+$GL_FRAGMENT_SHADER  = u32 0x8B30
+$GL_FLOAT            = u32 0x1406
+$GL_INFO_LOG_LENGTH  = u32 0x8B84
+$GL_COMPILE_STATUS   = u32 0x8B81
+$GL_LINK_STATUS      = u32 0x8B82
 
-; GLFW Key Constants
-$KEY_RIGHT = i32 262
-$KEY_LEFT  = i32 263
-$KEY_DOWN  = i32 264
-$KEY_UP    = i32 265
+$KEY_ESCAPE = i32 256
+$KEY_RIGHT  = i32 262
+$KEY_LEFT   = i32 263
+$KEY_DOWN   = i32 264
+$KEY_UP     = i32 265
 
-; Boundary Constants (NDC space: -1.0 to 1.0, with triangle size offset)
 $BOUND_LEFT   = f32 -0.9
 $BOUND_RIGHT  = f32 0.9
 $BOUND_BOTTOM = f32 -0.9
 $BOUND_TOP    = f32 0.9
-
-; Shaders
 
 $vertex_shader_src = str "
 #version 330 core
@@ -39,206 +37,170 @@ $fragment_shader_src = str "
 #version 330 core
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(0.2, 0.8, 1.0, 1.0); 
+    FragColor = vec4(0.2, 0.8, 1.0, 1.0);
 }"
 
-; Initialization
+assert(glfw3.dll i32 glfwInit() != 0, "glfwInit")
+$window = glfw3.dll ptr glfwCreateWindow(i32 800, i32 600, str "Bounded Movement", ptr 0, ptr 0)
+assert($window != 0, "glfwCreateWindow")
+glfw3.dll void glfwMakeContextCurrent(ptr $window)
 
-; Load math functions for clamping
-/loaddll ucrtbase.dll
-$fminf = /address ucrtbase.dll fminf
-$fmaxf = /address ucrtbase.dll fmaxf
+$glClear                   = glfw3.dll ptr glfwGetProcAddress(str "glClear")
+$glDrawArrays              = glfw3.dll ptr glfwGetProcAddress(str "glDrawArrays")
+$glGenBuffers              = glfw3.dll ptr glfwGetProcAddress(str "glGenBuffers")
+$glBindBuffer              = glfw3.dll ptr glfwGetProcAddress(str "glBindBuffer")
+$glBufferData              = glfw3.dll ptr glfwGetProcAddress(str "glBufferData")
+$glGenVertexArrays         = glfw3.dll ptr glfwGetProcAddress(str "glGenVertexArrays")
+$glBindVertexArray         = glfw3.dll ptr glfwGetProcAddress(str "glBindVertexArray")
+$glEnableVertexAttribArray = glfw3.dll ptr glfwGetProcAddress(str "glEnableVertexAttribArray")
+$glVertexAttribPointer     = glfw3.dll ptr glfwGetProcAddress(str "glVertexAttribPointer")
+$glCreateShader            = glfw3.dll ptr glfwGetProcAddress(str "glCreateShader")
+$glShaderSource            = glfw3.dll ptr glfwGetProcAddress(str "glShaderSource")
+$glCompileShader           = glfw3.dll ptr glfwGetProcAddress(str "glCompileShader")
+$glCreateProgram           = glfw3.dll ptr glfwGetProcAddress(str "glCreateProgram")
+$glAttachShader            = glfw3.dll ptr glfwGetProcAddress(str "glAttachShader")
+$glLinkProgram             = glfw3.dll ptr glfwGetProcAddress(str "glLinkProgram")
+$glUseProgram              = glfw3.dll ptr glfwGetProcAddress(str "glUseProgram")
+$glDeleteShader            = glfw3.dll ptr glfwGetProcAddress(str "glDeleteShader")
+$glGetUniformLocation      = glfw3.dll ptr glfwGetProcAddress(str "glGetUniformLocation")
+$glUniform2f               = glfw3.dll ptr glfwGetProcAddress(str "glUniform2f")
+$glGetShaderiv             = glfw3.dll ptr glfwGetProcAddress(str "glGetShaderiv")
+$glGetProgramiv            = glfw3.dll ptr glfwGetProcAddress(str "glGetProgramiv")
+$glGetShaderInfoLog        = glfw3.dll ptr glfwGetProcAddress(str "glGetShaderInfoLog")
+$glGetProgramInfoLog       = glfw3.dll ptr glfwGetProcAddress(str "glGetProgramInfoLog")
+$glDeleteProgram           = glfw3.dll ptr glfwGetProcAddress(str "glDeleteProgram")
+$glDeleteVertexArrays      = glfw3.dll ptr glfwGetProcAddress(str "glDeleteVertexArrays")
+$glDeleteBuffers           = glfw3.dll ptr glfwGetProcAddress(str "glDeleteBuffers")
 
-/loaddll glfw3.dll
-i32 glfwInit()
-$w = voidptr glfwCreateWindow(i32 800, i32 600, str "Bounded Movement", voidptr 0, voidptr 0) --assert=nonzero
-void glfwMakeContextCurrent(voidptr $w)
+assert($glClear != 0 && $glDrawArrays != 0 && $glGenBuffers != 0 && $glBindBuffer != 0)
+assert($glBufferData != 0 && $glGenVertexArrays != 0 && $glBindVertexArray != 0)
+assert($glEnableVertexAttribArray != 0 && $glVertexAttribPointer != 0)
+assert($glCreateShader != 0 && $glShaderSource != 0 && $glCompileShader != 0)
+assert($glCreateProgram != 0 && $glAttachShader != 0 && $glLinkProgram != 0)
+assert($glUseProgram != 0 && $glDeleteShader != 0 && $glGetUniformLocation != 0)
+assert($glUniform2f != 0 && $glGetShaderiv != 0 && $glGetProgramiv != 0)
+assert($glGetShaderInfoLog != 0 && $glGetProgramInfoLog != 0)
+assert($glDeleteProgram != 0 && $glDeleteVertexArrays != 0 && $glDeleteBuffers != 0)
 
-; Load GL Functions 
-$glClear         = voidptr glfwGetProcAddress(str "glClear") --assert=nonzero
-$glDrawArrays    = voidptr glfwGetProcAddress(str "glDrawArrays") --assert=nonzero
-$glGenBuffers    = voidptr glfwGetProcAddress(str "glGenBuffers") --assert=nonzero
-$glBindBuffer    = voidptr glfwGetProcAddress(str "glBindBuffer") --assert=nonzero
-$glBufferData    = voidptr glfwGetProcAddress(str "glBufferData") --assert=nonzero
-$glGenVertexArrays = voidptr glfwGetProcAddress(str "glGenVertexArrays") --assert=nonzero
-$glBindVertexArray = voidptr glfwGetProcAddress(str "glBindVertexArray") --assert=nonzero
-$glEnableVertexAttribArray = voidptr glfwGetProcAddress(str "glEnableVertexAttribArray") --assert=nonzero
-$glVertexAttribPointer = voidptr glfwGetProcAddress(str "glVertexAttribPointer") --assert=nonzero
-$glCreateShader  = voidptr glfwGetProcAddress(str "glCreateShader") --assert=nonzero
-$glShaderSource  = voidptr glfwGetProcAddress(str "glShaderSource") --assert=nonzero
-$glCompileShader = voidptr glfwGetProcAddress(str "glCompileShader") --assert=nonzero
-$glCreateProgram = voidptr glfwGetProcAddress(str "glCreateProgram") --assert=nonzero
-$glAttachShader  = voidptr glfwGetProcAddress(str "glAttachShader") --assert=nonzero
-$glLinkProgram   = voidptr glfwGetProcAddress(str "glLinkProgram") --assert=nonzero
-$glUseProgram    = voidptr glfwGetProcAddress(str "glUseProgram") --assert=nonzero
-$glDeleteShader  = voidptr glfwGetProcAddress(str "glDeleteShader") --assert=nonzero
-$glGetUniformLocation = voidptr glfwGetProcAddress(str "glGetUniformLocation") --assert=nonzero
-$glUniform2f          = voidptr glfwGetProcAddress(str "glUniform2f") --assert=nonzero
-$glGetShaderiv        = voidptr glfwGetProcAddress(str "glGetShaderiv") --assert=nonzero
-$glGetProgramiv       = voidptr glfwGetProcAddress(str "glGetProgramiv") --assert=nonzero
-$glGetShaderInfoLog   = voidptr glfwGetProcAddress(str "glGetShaderInfoLog") --assert=nonzero
-$glGetProgramInfoLog  = voidptr glfwGetProcAddress(str "glGetProgramInfoLog") --assert=nonzero
-$glDeleteProgram      = voidptr glfwGetProcAddress(str "glDeleteProgram") --assert=nonzero
-$glDeleteVertexArrays = voidptr glfwGetProcAddress(str "glDeleteVertexArrays") --assert=nonzero
-$glDeleteBuffers      = voidptr glfwGetProcAddress(str "glDeleteBuffers") --assert=nonzero
-
-; Mesh Setup
-
-$vertices = msvcrt.dll voidptr malloc(u64 24) --assert=nonzero
-/set $vertices    f32 -0.1
-/set $vertices+4  f32 -0.1
-/set $vertices+8  f32  0.1
-/set $vertices+12 f32 -0.1
-/set $vertices+16 f32  0.0
-/set $vertices+20 f32  0.1
+$vertices = f32[6] {
+    -0.1, -0.1,
+     0.1, -0.1,
+     0.0,  0.1
+}
 
 $VAO = u32 0
 $VBO = u32 0
-void $glGenVertexArrays(i32 1, voidptr &$VAO)
-void $glGenBuffers(i32 1, voidptr &$VBO)
-
+void $glGenVertexArrays(i32 1, ptr &$VAO)
+void $glGenBuffers(i32 1, ptr &$VBO)
 void $glBindVertexArray(u32 $VAO)
 void $glBindBuffer(u32 $GL_ARRAY_BUFFER, u32 $VBO)
-void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 24, voidptr $vertices, u32 $GL_STATIC_DRAW)
-
-void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, voidptr 0)
+void $glBufferData(u32 $GL_ARRAY_BUFFER, i64 sizeof($vertices), ptr &$vertices, u32 $GL_STATIC_DRAW)
+void $glVertexAttribPointer(u32 0, i32 2, u32 $GL_FLOAT, u8 0, i32 8, ptr 0)
 void $glEnableVertexAttribArray(u32 0)
-
 opengl32.dll void glClearColor(f32 0.1, f32 0.1, f32 0.1, f32 1.0)
 
-; Shader Compilation
-
-$vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER) --assert=nonzero
-void $glShaderSource(u32 $vShader, i32 1, voidptr &$vertex_shader_src, voidptr 0)
+$vShader = u32 $glCreateShader(u32 $GL_VERTEX_SHADER)
+assert($vShader != 0, "vertex shader allocation")
+void $glShaderSource(u32 $vShader, i32 1, ptr &$vertex_shader_src, ptr 0)
 void $glCompileShader(u32 $vShader)
-
 $status = i32 0
-void $glGetShaderiv(u32 $vShader, u32 0x8B81, voidptr &$status)
-$fail = i32 1 - $status ; 1 = fail, 0 = success
-; if without an if lmao
-/for $fail {
-    $logLen = i32 0,
-    void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
-
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
-    void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, voidptr 0, voidptr $logBuf),
-
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
-    msvcrt.dll void free(voidptr $logBuf),
-    /quit
+void $glGetShaderiv(u32 $vShader, u32 $GL_COMPILE_STATUS, ptr &$status)
+if ($status == 0) {
+    $logLen = i32 0
+    void $glGetShaderiv(u32 $vShader, u32 $GL_INFO_LOG_LENGTH, ptr &$logLen)
+    $logBuf = msvcrt.dll ptr malloc(u64 $logLen)
+    assert($logBuf != 0, "vertex shader log allocation")
+    void $glGetShaderInfoLog(u32 $vShader, i32 $logLen, ptr 0, ptr $logBuf)
+    msvcrt.dll i32 printf(str "vertex shader error:\n%s\n", ptr $logBuf)
+    quit()
 }
 
-$fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER) --assert=nonzero
-void $glShaderSource(u32 $fShader, i32 1, voidptr &$fragment_shader_src, voidptr 0)
+$fShader = u32 $glCreateShader(u32 $GL_FRAGMENT_SHADER)
+assert($fShader != 0, "fragment shader allocation")
+void $glShaderSource(u32 $fShader, i32 1, ptr &$fragment_shader_src, ptr 0)
 void $glCompileShader(u32 $fShader)
-
 $status = i32 0
-void $glGetShaderiv(u32 $fShader, u32 0x8B81, voidptr &$status)
-$fail = i32 1 - $status
-/for $fail {
-    $logLen = i32 0,
-    void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
-
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
-    void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, voidptr 0, voidptr $logBuf),
-
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
-    msvcrt.dll void free(voidptr $logBuf),
-    /quit
+void $glGetShaderiv(u32 $fShader, u32 $GL_COMPILE_STATUS, ptr &$status)
+if ($status == 0) {
+    $logLen = i32 0
+    void $glGetShaderiv(u32 $fShader, u32 $GL_INFO_LOG_LENGTH, ptr &$logLen)
+    $logBuf = msvcrt.dll ptr malloc(u64 $logLen)
+    assert($logBuf != 0, "fragment shader log allocation")
+    void $glGetShaderInfoLog(u32 $fShader, i32 $logLen, ptr 0, ptr $logBuf)
+    msvcrt.dll i32 printf(str "fragment shader error:\n%s\n", ptr $logBuf)
+    quit()
 }
 
-$prog = u32 $glCreateProgram()
-void $glAttachShader(u32 $prog, u32 $vShader)
-void $glAttachShader(u32 $prog, u32 $fShader)
-void $glLinkProgram(u32 $prog)
+$program = u32 $glCreateProgram()
+assert($program != 0, "glCreateProgram")
+void $glAttachShader(u32 $program, u32 $vShader)
+void $glAttachShader(u32 $program, u32 $fShader)
+void $glLinkProgram(u32 $program)
 void $glDeleteShader(u32 $vShader)
 void $glDeleteShader(u32 $fShader)
 
 $status = i32 0
-void $glGetProgramiv(u32 $prog, u32 0x8B82, voidptr &$status)
-$fail = i32 1 - $status
-/for $fail {
-    $logLen = i32 0,
-    void $glGetProgramiv(u32 $prog, u32 $GL_INFO_LOG_LENGTH, voidptr &$logLen),
-
-    $logBuf = msvcrt.dll voidptr malloc(u64 $logLen) --assert=nonzero,
-    void $glGetProgramInfoLog(u32 $prog, i32 $logLen, voidptr 0, voidptr $logBuf),
-
-    msvcrt.dll i32 printf(str "%s\n", voidptr $logBuf),
-    msvcrt.dll void free(voidptr $logBuf),
-    /quit
+void $glGetProgramiv(u32 $program, u32 $GL_LINK_STATUS, ptr &$status)
+if ($status == 0) {
+    $logLen = i32 0
+    void $glGetProgramiv(u32 $program, u32 $GL_INFO_LOG_LENGTH, ptr &$logLen)
+    $logBuf = msvcrt.dll ptr malloc(u64 $logLen)
+    assert($logBuf != 0, "program log allocation")
+    void $glGetProgramInfoLog(u32 $program, i32 $logLen, ptr 0, ptr $logBuf)
+    msvcrt.dll i32 printf(str "program link error:\n%s\n", ptr $logBuf)
+    quit()
 }
 
-$uOffsetLoc = i32 $glGetUniformLocation(u32 $prog, str "uOffset")
+$uOffsetLoc = i32 $glGetUniformLocation(u32 $program, str "uOffset")
+assert($uOffsetLoc >= 0, "uOffset uniform")
 
-; Timing
 $endTime = kernel32.dll u32 GetTickCount()
-$elapsedTime = i64 $endTime - $startTime
-msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime) ; stupid microsoft
+$elapsedTime = i64 (i64 $endTime - i64 $startTime)
+msvcrt.dll i32 printf(str "time: %lldms\n", i64 $elapsedTime)
 
-; State Variables
 $lastFrameTime = glfw3.dll f64 glfwGetTime()
 $unitsPerSecond = f32 1.5
 $posX = f32 0.0
 $posY = f32 0.0
 
-; Main Loop
-/repeat { 
-    i32 glfwWindowShouldClose(voidptr $w) --assert=zero,
-    $esc = i32 glfwGetKey(voidptr $w, i32 256),
-    /assert $esc zero,
+while (glfw3.dll i32 glfwWindowShouldClose(ptr $window) == 0) {
+    if (glfw3.dll i32 glfwGetKey(ptr $window, i32 $KEY_ESCAPE) != 0) {
+        break
+    }
 
-    $currentFrameTime = glfw3.dll f64 glfwGetTime(),
-    $dt_double = f64 $currentFrameTime - $lastFrameTime,
-    $lastFrameTime = f64 $currentFrameTime,
-    $dt = f32 $dt_double,
+    $currentFrameTime = glfw3.dll f64 glfwGetTime()
+    $dt = f32 (f64 $currentFrameTime - f64 $lastFrameTime)
+    $lastFrameTime = $currentFrameTime
 
-    ; X Movement
-    $right = i32 glfwGetKey(voidptr $w, i32 $KEY_RIGHT),
-    $left  = i32 glfwGetKey(voidptr $w, i32 $KEY_LEFT),
-    $dirX  = i32 $right - $left,
-    
-    $moveX = f32 $dirX,
-    $moveX = f32 $moveX * $unitsPerSecond,
-    $moveX = f32 $moveX * $dt, 
-    $posX  = f32 $posX + $moveX,
+    $right = glfw3.dll i32 glfwGetKey(ptr $window, i32 $KEY_RIGHT)
+    $left  = glfw3.dll i32 glfwGetKey(ptr $window, i32 $KEY_LEFT)
+    $dirX  = i32 ($right - $left)
+    $moveX = f32 (f32 $dirX * $unitsPerSecond * $dt)
+    $posX  = f32 ($posX + $moveX)
 
-    ; Y Movement
-    $up    = i32 glfwGetKey(voidptr $w, i32 $KEY_UP),
-    $down  = i32 glfwGetKey(voidptr $w, i32 $KEY_DOWN),
-    $dirY  = i32 $up - $down,
-    
-    $moveY = f32 $dirY,
-    $moveY = f32 $moveY * $unitsPerSecond,
-    $moveY = f32 $moveY * $dt,
-    $posY  = f32 $posY + $moveY,
+    $up    = glfw3.dll i32 glfwGetKey(ptr $window, i32 $KEY_UP)
+    $down  = glfw3.dll i32 glfwGetKey(ptr $window, i32 $KEY_DOWN)
+    $dirY  = i32 ($up - $down)
+    $moveY = f32 (f32 $dirY * $unitsPerSecond * $dt)
+    $posY  = f32 ($posY + $moveY)
 
-    ; Boundary Clamping
-    ; Clamp X: posX = max(BOUND_LEFT, min(posX, BOUND_RIGHT))
-    $posX = f32 $fminf(f32 $posX, f32 $BOUND_RIGHT),
-    $posX = f32 $fmaxf(f32 $posX, f32 $BOUND_LEFT),
-    
-    ; Clamp Y: posY = max(BOUND_BOTTOM, min(posY, BOUND_TOP))
-    $posY = f32 $fminf(f32 $posY, f32 $BOUND_TOP),
-    $posY = f32 $fmaxf(f32 $posY, f32 $BOUND_BOTTOM),
+    $posX = ucrtbase.dll f32 fminf(f32 $posX, f32 $BOUND_RIGHT)
+    $posX = ucrtbase.dll f32 fmaxf(f32 $posX, f32 $BOUND_LEFT)
+    $posY = ucrtbase.dll f32 fminf(f32 $posY, f32 $BOUND_TOP)
+    $posY = ucrtbase.dll f32 fmaxf(f32 $posY, f32 $BOUND_BOTTOM)
 
-    ; Draw
-    void $glClear(u32 $GL_COLOR_BUFFER_BIT),
-    void $glUseProgram(u32 $prog),
-    void $glUniform2f(i32 $uOffsetLoc, f32 $posX, f32 $posY),
-    void $glBindVertexArray(u32 $VAO),
-    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3),
-    void glfwSwapBuffers(voidptr $w),
-    void glfwPollEvents(),
+    void $glClear(u32 $GL_COLOR_BUFFER_BIT)
+    void $glUseProgram(u32 $program)
+    void $glUniform2f(i32 $uOffsetLoc, f32 $posX, f32 $posY)
+    void $glBindVertexArray(u32 $VAO)
+    void $glDrawArrays(u32 $GL_TRIANGLES, i32 0, i32 3)
+    glfw3.dll void glfwSwapBuffers(ptr $window)
+    glfw3.dll void glfwPollEvents()
 }
 
-; Cleanup
-msvcrt.dll i32 printf(str "goodbye!\n")
-
-void $glDeleteVertexArrays(i32 1, voidptr &$VAO)
-void $glDeleteBuffers(i32 1, voidptr &$VBO)
-void $glDeleteProgram(u32 $prog)
-glfw3.dll void glfwDestroyWindow(voidptr $w)
+void $glDeleteVertexArrays(i32 1, ptr &$VAO)
+void $glDeleteBuffers(i32 1, ptr &$VBO)
+void $glDeleteProgram(u32 $program)
+glfw3.dll void glfwDestroyWindow(ptr $window)
 glfw3.dll void glfwTerminate()
-msvcrt.dll void free(voidptr $vertices)
-/quit
+msvcrt.dll i32 printf(str "goodbye!\n")

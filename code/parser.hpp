@@ -1,12 +1,7 @@
 #pragma once
-#include "lexer.hpp"
-#include "common.hpp" 
+#include "ast.hpp"
+#include <memory>
+#include <string>
+#include <string_view>
 
-// The Context bucket (passed around, never owns logic)
-struct ParseContext {
-    const std::vector<Token>& tokens;
-    size_t pos;
-};
-
-// Main entry point
-void parse_and_execute(std::vector<Token>& tokens);
+std::shared_ptr<Module> parse_module(std::string source, std::string source_name = "<input>");

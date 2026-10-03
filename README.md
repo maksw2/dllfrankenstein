@@ -5,31 +5,6 @@ Manually load DLLs, manipulate memory, and invoke native functions.
 With great power comes great segfaults.  
 scary shit
 
-Unix gives you just enough rope to hang yourself – and then a couple of more feet, just to be sure. ~ Eric Allman
-
-## warning
-
-This tool does not validate function signatures.
-If you lie, the program will believe you.
-
-The stack is protected.
-The registers are protected.
-The heap is not.
-
-The ABI is respected.
-Your arguments are not.
-
-All states are legal.
-Some are regrettable.
-
-SEH will catch crashes.
-It will not save your program.
-
-This is a personal systems playground.  
-There are no compatibility guarantees.  
-Syntax, semantics, and runtime behavior may change at any time.  
-If you build on this, you accept breakage as a feature.
-
 ## how 2 use it
 
 to build the app:
@@ -37,57 +12,159 @@ to build the app:
 
 wow, a windows tool uses a windows scripting language for build 👻
 
-to build the test dll:
-- `cl /LD /Zi code\test.c /link /debug /out:examples\test.dll user32.lib gdi32.lib legacy_stdio_definitions.lib`
-
 ## help string
 
 ```
 wilczurski's cool shit - ffi
-Basic usage: invoke.exe <dll_path> <return_type> <func_name>(<arg_type> <arg_value, ...)
-        [--print-result] [--assert[v]=<type>] [--quiet]
-    <func_name> can be an ordinal like #<ordinal>
-    or: invoke.exe --interactive or invoke.exe --script <script_path>
-    <type> can be: zero, nonzero, negative, nonnegative
-    assertv reports success/failure where assert exits if failure
-    The exception to this is usage in loops, there it is used as an exit condition
-    --quiet does not emit any prints to the console except errors. Also silences all struct definitions.
-    Scripts by default use .ffi, it is not enforced
-Usage in interactive/script mode is the same as non-interactive with more features
-    except when focused on a DLL, then you don't need to specify <dll_path>
-Commands in interactive/script mode:
-    To write a comment use ; like in assembly
-    /loaddll <path>                     Load and focus a DLL or just focus if loaded
-    /freedll <path>                     Unload a DLL
-    /set     <addr>     <type>  <value> Store a value at a memory address
-    /get     <addr>     <type>          Get a value from a memory address
-    /hex     <addr>     [count]         Hex dump memory
-    /address <dll_path> <name>          Get a function pointer by name or #ordinal
-    /struct  { <type> <name>, ... }     Calculate the offsets and size of a struct
-    /struct  { $<name> = <type> <name>, ... } Calculate the offsets and size of a struct and assign offsets
-    Both assume default packing and return the size. You can have structs in structs.
-    Use the --quiet flag to suppress debug output. Local to this declaration
-    /dlls                               List loaded DLLs
-    /for     <count>    {<cmd>, ...}    Repeat {} <count> times. You can use this as an if you're stubborn enough
-    /repeat             {<cmd>, ...}    Repeat {} until assert failure
-    /quit                               Exit the program
-Variables have no scopes. Beware not to write more than 8 bytes. Strings are read-only, use malloc if you need a mutable string.
-    $<name> = <type> <value>    Set variable value (e.g. $val = i32 10)
-    $<name> = <command>         Capture command/function output into variable
-    &$<name>                    Address-of: Get the memory pointer to a variable's storage
-    *$<name>                    Dereference: Read 64-bit value from the address stored in $<name>
-    $i is a reserved variable for loop iterations. It is intentionally not reset on break
-    Variables can be used as function arguments, like msvcrt.dll i32 printf(str "%d", i32 $<name>)
-    Variables can store arbitrary data, values like '$a = i32 69' or pointers like '$p = voidptr 0x12345678'
-    you can have complex inline expressions like '$file_exists_bool = i64 (($or_i >> 63) | -($or_i >> 63)) & 1'
-Types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, str, wstr, voidptr, void
-    Or their "proper" version: int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double
-    str, wstr, voidptr are equivalent to C's narrow null-terminated string (char*), wide string (wchar_t*), pointer (void*)
-    In the case of 'str' interpretation is entirely up to the callee (ACP, UTF-8, ASCII, or raw even bytes).
-    No validation or conversion is performed
-You can pass hex and decimal values. Types are advisory, not enforced. It's your fault when a function reads garbage
-SEH exists only to stop instant termination, not to save you. You are saved from null pointers in the built-in commands
-Any error is fatal when running a script
+
+USAGE
+  invoke.exe --interactive | -i [--quiet]
+  invoke.exe --script <file.ffi> [--quiet]
+  invoke.exe --check <file.ffi>
+  invoke.exe --eval <source> [--quiet]
+  invoke.exe <source...>
+
+OPTIONS
+  --quiet - suppress normal result, dump, and list output
+  --check <file.ffi> - parse and type-check a script without executing it
+  --interactive, -i - start the REPL
+  --help, -h, -?, /h, /? - show this reference
+
+SOURCE
+  ; comment - comment to end of line
+  // comment - comment to end of line
+  Semicolons start comments; they are not statement terminators.
+  Statements do not require terminators.
+
+TYPES
+  i8, i16, i32, i64 - signed integers
+  u8, u16, u32, u64 - unsigned integers
+  f32, f64 - floating point
+  str, wstr - narrow and wide null-terminated string pointers
+  ptr - untyped pointer
+  void - return type only
+
+VALUES AND VARIABLES
+  $x = i32 42
+  $x = i32 ($y + 1)
+  $p = ptr &$x
+  $next = $p + 8
+  $bytes = $end - $begin
+  $v = i32 *$p
+  i32 *$p = $v
+
+  Blocks create variable scopes. Assigning an existing name redefines that variable in
+  the scope where it already exists. New names are created in the current scope.
+  Scalar variables adopt the value and type of the right-hand side when assigned.
+  i32 $x numerically converts $x; i32 *&$x reads the same storage as i32 instead.
+  Pointer arithmetic is always in bytes.
+
+FUNCTIONS
+  i32 add(i32 $a, i32 $b) {
+      return $a + $b
+  }
+
+  add(1, 2) - call a previously defined script function
+  i32 add(i32 1, i32 2) - call with a caller-provided signature
+  i32 SomeExport(i32 1) - call the focused DLL, unless a script function has that name
+  user32.dll i32 SomeExport(i32 1) - call a specific DLL
+  i32 $fn(i32 1) - call an address stored in a variable
+  &add - get the function's address
+
+  Untyped calls require a previously defined script function.
+  Script functions take priority over symbols in the focused DLL.
+  Redefining a function does not change its memory position.
+
+STRUCTS, UNIONS, ARRAYS
+  struct POINT {
+      i32 x
+      i32 y
+  }
+
+  struct PACKED pack(1) {
+      u8 tag
+      u32 value
+  }
+
+  union NUMBER {
+      i64 integer
+      f64 floating
+  }
+
+  struct BUFFER {
+      u32 length
+      u8 data[256]
+  }
+
+  $p = POINT { .x = 10, .y = 20 }
+  $x = $p.x
+  $p.x = 30
+  $b = $buffer.data[4]
+  $tmp = struct { i32 x i32 y } { .x = 1, .y = 2 }
+
+  sizeof(POINT) - size of a type in bytes
+  sizeof($p) - size of a value in bytes
+  alignof(POINT) - alignment of a type
+  offsetof(POINT, x) - byte offset of a field; nested paths are allowed
+
+  Named aggregate types must be defined before use.
+  Redefining a named aggregate creates a new type definition.
+  Aggregate initializer fields are comma-separated; unspecified fields are zeroed.
+
+ARRAYS
+  $vertices = f32[6] { -0.5, -0.5, 0.5, -0.5, 0.0, 0.5 }
+  $scratch = u8[4096] {} - omitted elements are zeroed
+  $vertices[2] = 0.25
+  $x = $vertices[2]
+  sizeof($vertices) - total byte size of the array
+  &$vertices - address of the array storage
+
+  Arrays are fixed-size values with automatic storage for local variables.
+  Array initializer elements are comma-separated and converted to the element type.
+  [N] is part of the type, so sizeof(f32[6]) and f32[6] *$address are also valid.
+
+CONTROL FLOW
+  if ($x) { ... }
+  if ($x) { ... } else if ($y) { ... } else { ... }
+  while ($x) { ... }
+  break
+  continue
+  return
+  return $value
+  assert($condition)
+  assert($condition, "message")
+
+  if and while bodies require braces. Zero is false; nonzero is true.
+  break and continue are valid only inside while.
+  return is valid only inside a function.
+
+OPERATORS
+  unary - - ! ~ &
+  arithmetic - + - * / %
+  shifts - << >>
+  comparison - == != < <= > >=
+  bitwise - & ^ |
+  logical - && ||
+
+MEMORY
+  $value = i32 *$address - read an i32 from an address
+  i32 *$address = 123 - write an i32 to an address
+  f32 *($address + 4) = 1.0 - typed memory access may use any scalar address expression
+  hex($address, 64) - dump 64 bytes from an address
+
+  The memory access type controls the width and interpretation of the access.
+  The address expression is not converted: its raw scalar bits are used as the address.
+  Assignment to a typed memory place converts the right-hand side to the place type.
+  Pointer arithmetic is always in bytes.
+
+DLLS
+  load("foo.dll") - load a DLL and make it focused
+  focus("foo.dll") - focus a DLL, loading it if necessary
+  free("foo.dll") - unload a DLL
+  dlls() - list loaded DLLs; * marks the focused DLL
+  address("foo.dll", "Symbol") - get an exported symbol address
+  address("foo.dll", "#123") - get an export by ordinal
+  quit() - exit the interpreter or REPL
 ```
 
 ## examples
@@ -256,22 +333,6 @@ Reason: Privileged Instruction
 
 </details>
 
-<details>
-<summary><b>a simple MADPCM player</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>invoke --quiet --script audio.ffi
-Loading MADPCM file...
-Decoding to PCM...
-Applying Inverse Mid/Side Transform (M/S -> L/R)...
-Format: 48000 Hz, 2 Channels, 11414528 Samples
-Playing...
-sleeping for 238802 ms
-goodbye!
-```
-
-</details>
-
 The following examples are intentionally hostile to the tool's design.
 They exist to show limits, not best practices.
 
@@ -306,7 +367,8 @@ They exist to show limits, not best practices.
 ## how 2 contribute
 
 4 spaces, not tabs  
-`if (condition) {`  
+k&r braces  
+pointer belongs to the type  
 test your changes  
 make a pr
 
@@ -320,33 +382,25 @@ Q: Why make this?
 A: Because `rundll32.exe` is stupid. Everything rundll32 can do, this tool does better and more
 
 Q: What's the use case for it?  
-A: Poking random DLLs without writing C. If you need more structure than that, this probably isn’t for you.
+A: Poking random DLLs without writing C.
 
 Q: Is this safe?  
-A: In my experience. If you're careful enough.  
-
-Q: But really?  
-A: There's no compiler to warn you.
+A: In my experience.  
 
 Q: Can this brick my system?  
 A: If you're creative enough.
 
 Q: Can I use this in production?  
-A: If you're brave enough. No warranty.
+A: No warranty.
 
 Q: Why is the syntax like this?  
 A: It made sense at 3 AM.
 
 Q: What inspired the syntax?  
-A: The syntax was inspired by:  
-comments: assembly  
-variables: powershell  
-commands: factorio  
-surface syntax: c  
-alcohol: types
+A: Alcohol.
 
 Q: It crashed!  
-A: Open an issue. **Describe it well.** “It crashed” is not a report.
+A: Probably your fault.
 
 Q: Does it support all calling conventions?  
 A: Technically.
@@ -355,10 +409,7 @@ Q: Are there bugs?
 A: Features in progress.
 
 Q: Can I do pointer math?  
-A: Yes.
-
-Q: What is the scale of pointer math?  
-A: Bytes. Always.
+A: Haven't you read the help string?
 
 Q: Does it support variable arguments?  
 A: Variadic argument promotion does not exist. You need to know which type to cast to.

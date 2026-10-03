@@ -4,8 +4,7 @@ invoke.pdb
 examples/test.dll
 examples/test.ilk
 examples/test.pdb
-test.exp
-test.lib
-test.obj
+examples/test.exp
+examples/test.lib
 vc140.pdb
 obj/

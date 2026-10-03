@@ -1,39 +1,63 @@
-; window_w.ffi
-$lpfnWndProc = /address test.dll WindowProcessW
-$hInstance = kernel32.dll voidptr GetModuleHandleW(i64 0) --assert=nonzero
-$lpszClassName = wstr "mywindowclass"
-$lpWindowName = wstr "mywindowname"
-$hCursor = user32.dll voidptr LoadCursorW(voidptr 0, i64 32512)
+struct WNDCLASSW {
+    u32 style,
+    ptr lpfnWndProc,
+    i32 cbClsExtra,
+    i32 cbWndExtra,
+    ptr hInstance,
+    ptr hIcon,
+    ptr hCursor,
+    ptr hbrBackground,
+    ptr lpszMenuName,
+    wstr lpszClassName,
+}
 
-$wc_size = /struct { $style_off = u32 style, $lpfnWndProc_off = voidptr lpfnWndProc,
- i32 cbClsExtra, i32 cbWndExtra, $hInstance_off = voidptr hInstance, voidptr hIcon,
- $hCursor_off = voidptr hCursor, $hbrBackground_off = voidptr hbrBackground,
- voidptr lpszMenuName, $lpszClassName_off = voidptr lpszClassName }
+struct POINT {
+    i32 x,
+    i32 y,
+}
+struct MSG {
+    ptr hwnd,
+    u32 message,
+    u64 wParam,
+    i64 lParam,
+    u32 time,
+    POINT pt,
+    u32 lPrivate,
+}
 
-$wc = msvcrt.dll voidptr malloc(u64 $wc_size) --assert=nonzero
-msvcrt.dll voidptr memset(voidptr $wc, i32 0, u64 $wc_size)
+i64 WindowProc(ptr $hwnd, u32 $msg, u64 $wparam, i64 $lparam) {
+    if ($msg == 2) {
+        user32.dll void PostQuitMessage(i32 0)
+        return 0
+    }
+    return user32.dll i64 DefWindowProcW(ptr $hwnd, u32 $msg, u64 $wparam, i64 $lparam)
+}
 
-/set $wc+$style_off u32 3
-/set $wc+$lpfnWndProc_off voidptr $lpfnWndProc
-/set $wc+$hInstance_off voidptr $hInstance
-/set $wc+$hCursor_off voidptr $hCursor
-/set $wc+$hbrBackground_off voidptr 6
-/set $wc+$lpszClassName_off voidptr $lpszClassName
+$instance = kernel32.dll ptr GetModuleHandleW(ptr 0)
+$cursor = user32.dll ptr LoadCursorW(ptr 0, i64 32512)
+$class_name = wstr "dllfrankenstein-window-w"
+$window_name = wstr "dllfrankenstein wide"
 
-$class_atom = user32.dll u16 RegisterClassW(voidptr $wc) --assert=nonzero
-$hWnd = user32.dll voidptr CreateWindowExW(u32 0, voidptr $lpszClassName, voidptr $lpWindowName,
- u32 0x00CF0000, i32 100, i32 100, i32 400, i32 200, voidptr 0, voidptr 0, voidptr $hInstance, voidptr 0) --assert=nonzero
-user32.dll i32 ShowWindow(voidptr $hWnd, i32 5)
+$wc = WNDCLASSW {
+    .style = 3,
+    .lpfnWndProc = &WindowProc,
+    .hInstance = $instance,
+    .hCursor = $cursor,
+    .hbrBackground = ptr 6,
+    .lpszClassName = $class_name
+}
 
-$MSG_size = /struct { voidptr hwnd, u32 message, u64 wParam, i64 lParam, u32 time, { i32 x, i32 y } pt } --quiet
+assert(user32.dll u16 RegisterClassW(ptr &$wc) != 0)
+$window = user32.dll ptr CreateWindowExW(
+    u32 0, wstr $class_name, wstr $window_name, u32 0x00CF0000,
+    i32 100, i32 100, i32 400, i32 200,
+    ptr 0, ptr 0, ptr $instance, ptr 0
+)
+assert($window != 0)
+user32.dll i32 ShowWindow(ptr $window, i32 5)
 
-$msg = msvcrt.dll voidptr malloc(u64 $MSG_size) --assert=nonzero
-msvcrt.dll voidptr memset(voidptr $msg, i32 0, u64 $MSG_size)
-
-/repeat {user32.dll i32 GetMessageW(voidptr $msg, voidptr 0, u32 0, u32 0) --assert=nonzero,
- user32.dll i32 TranslateMessage(voidptr $msg), user32.dll i64 DispatchMessageW(voidptr $msg)}
-
-msvcrt.dll i32 wprintf(wstr "goodbye!\n")
-msvcrt.dll void free(voidptr $wc)
-msvcrt.dll void free(voidptr $msg)
-/quit
+$msg = MSG {}
+while (user32.dll i32 GetMessageW(ptr &$msg, ptr 0, u32 0, u32 0) > 0) {
+    user32.dll i32 TranslateMessage(ptr &$msg)
+    user32.dll i64 DispatchMessageW(ptr &$msg)
+}
