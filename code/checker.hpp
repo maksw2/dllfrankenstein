@@ -11,10 +11,25 @@ struct FunctionSignature {
     SourceSpan span{};
 };
 
+enum class FfiOriginKind {
+    Focused,
+    External,
+    Variable,
+};
+
+struct FfiBindingSignature {
+    FunctionSignature signature;
+    FfiOriginKind origin = FfiOriginKind::Focused;
+    std::string module_name;
+    std::string target_name;
+    SourceSpan span{};
+};
+
 struct SemanticSnapshot {
     std::unordered_map<std::string, TypeId> named_types;
     std::unordered_map<std::string, TypeId> variables;
     std::unordered_map<std::string, FunctionSignature> functions;
+    std::unordered_map<std::string, FfiBindingSignature> ffi_functions;
 };
 
 struct Warning {

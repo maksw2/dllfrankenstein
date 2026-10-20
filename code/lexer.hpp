@@ -16,7 +16,7 @@ enum class TokenKind : uint16_t {
     LParen, RParen,
     LBrace, RBrace,
     LBracket, RBracket,
-    Comma, Dot,
+    Comma, Dot, At,
 
     Equal,
     EqualEqual,

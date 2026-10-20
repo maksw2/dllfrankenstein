@@ -57,13 +57,16 @@ void check_and_execute(Runtime& runtime, const std::string& source, const std::s
     auto module = parse_module(source, name);
     CheckResult result = check_module(*module, runtime.types(), runtime.semantic_snapshot());
     print_warnings(name, result.warnings);
+    // Typed FFI calls declare module-global remembered call descriptors during
+    // checking, even when they occur inside a function or an untaken branch.
+    runtime.install_ffi_bindings(result.resulting_state.ffi_functions);
     Interpreter(runtime).execute_module(module, echo_calls);
 }
 
 void repl(bool quiet) {
     Runtime runtime(quiet);
     std::puts("dllfrankenstein repl");
-    std::puts("Use quit() to exit.");
+    std::puts("Use quit() or quit(code) to exit.");
     std::string buffer;
     bool incomplete = false;
     uint64_t chunk = 1;
@@ -132,13 +135,13 @@ VALUES AND VARIABLES
   $p = ptr &$x
   $next = $p + 8
   $bytes = $end - $begin
-  $v = i32 *$p
-  i32 *$p = $v
+  $v = i32 @$p
+  i32 @$p = $v
 
   Blocks create variable scopes. Assigning an existing name redefines that variable in
   the scope where it already exists. New names are created in the current scope.
   Scalar variables adopt the value and type of the right-hand side when assigned.
-  i32 $x numerically converts $x; i32 *&$x reads the same storage as i32 instead.
+  i32 $x numerically converts $x; i32 @&$x reads the same storage as i32 instead.
   Pointer arithmetic is always in bytes.
 
 FUNCTIONS
@@ -148,13 +151,17 @@ FUNCTIONS
 
   add(1, 2) - call a previously defined script function
   i32 add(i32 1, i32 2) - call with a caller-provided signature
-  i32 SomeExport(i32 1) - call the focused DLL, unless a script function has that name
-  user32.dll i32 SomeExport(i32 1) - call a specific DLL
-  i32 $fn(i32 1) - call an address stored in a variable
+  i32 SomeExport(i32 1) - call the focused DLL and remember its signature/origin
+  user32.dll i32 SomeExport(i32 1) - call a specific DLL and remember it as the origin
+  SomeExport(2) - reuse the remembered FFI signature and origin
+  i32 $fn(i32 1) - call an address stored in a variable and remember its signature/origin
+  $fn(2) - reuse the remembered signature while reading the current address from $fn
   &add - get the function's address
 
-  Untyped calls require a previously defined script function.
-  Script functions take priority over symbols in the focused DLL.
+  A fully typed FFI call declares/redeclares a global remembered call descriptor.
+  Later untyped calls convert arguments to that signature and reuse its DLL/variable origin.
+  A same-name script function takes priority over a remembered FFI function for bare named calls.
+  An unknown bare call reports: no known function 'Name'.
   Redefining a function does not change its memory position.
 
 STRUCTS, UNIONS, ARRAYS
@@ -195,19 +202,27 @@ STRUCTS, UNIONS, ARRAYS
 
 ARRAYS
   $vertices = f32[6] { -0.5, -0.5, 0.5, -0.5, 0.0, 0.5 }
-  $scratch = u8[4096] {} - omitted elements are zeroed
+  $flakes = SnowFlake[$MAX_FLAKES] - runtime-sized, uninitialized storage
+  $scratch = u8[4096] {} - an initializer zeroes omitted elements
   $vertices[2] = 0.25
   $x = $vertices[2]
   sizeof($vertices) - total byte size of the array
   &$vertices - address of the array storage
 
-  Arrays are fixed-size values with automatic storage for local variables.
-  Array initializer elements are comma-separated and converted to the element type.
-  [N] is part of the type, so sizeof(f32[6]) and f32[6] *$address are also valid.
+  Array extents may be integer expressions and are evaluated when the array is allocated.
+  No initializer leaves array storage uninitialized; {} explicitly zero-initializes it.
+  Array initializer elements are comma-separated, converted to the element type, and the remainder is zeroed.
+  [N] is part of the type, so sizeof(f32[6]), sizeof(i32[$n]), and f32[6] @$address are valid.
+  Runtime-sized arrays cannot be aggregate fields because aggregate layout must remain fixed.
 
 CONTROL FLOW
   if ($x) { ... }
   if ($x) { ... } else if ($y) { ... } else { ... }
+  switch ($x) {
+    case $a { ... }
+    case 2, $b + 1 { ... }
+    default { ... }
+  }
   while ($x) { ... }
   break
   continue
@@ -216,7 +231,10 @@ CONTROL FLOW
   assert($condition)
   assert($condition, "message")
 
-  if and while bodies require braces. Zero is false; nonzero is true.
+  if, switch arms, and while bodies require braces. Zero is false; nonzero is true.
+  switch evaluates its subject once, then case expressions left-to-right and top-to-bottom.
+  Case expressions are runtime scalar expressions, converted to the subject's current type before comparison.
+  The first matching arm runs; there is no fallthrough or required break. default is optional and must be last.
   break and continue are valid only inside while.
   return is valid only inside a function.
 
@@ -229,9 +247,9 @@ OPERATORS
   logical - && ||
 
 MEMORY
-  $value = i32 *$address - read an i32 from an address
-  i32 *$address = 123 - write an i32 to an address
-  f32 *($address + 4) = 1.0 - typed memory access may use any scalar address expression
+  $value = i32 @$address - read an i32 from an address
+  i32 @$address = 123 - write an i32 to an address
+  f32 @($address + 4) = 1.0 - typed memory access may use any scalar address expression
   hex($address, 64) - dump 64 bytes from an address
 
   The memory access type controls the width and interpretation of the access.
@@ -246,7 +264,7 @@ DLLS
   dlls() - list loaded DLLs; * marks the focused DLL
   address("foo.dll", "Symbol") - get an exported symbol address
   address("foo.dll", "#123") - get an export by ordinal
-  quit() - exit the interpreter or REPL)");
+  quit() or quit($code) - exit the interpreter or REPL with an optional i32 exit code)");
 }
 }
 

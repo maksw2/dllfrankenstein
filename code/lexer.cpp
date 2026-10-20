@@ -168,6 +168,7 @@ struct Scanner {
                 case ']': advance(); push(TokenKind::RBracket, start, sl, sc); break;
                 case ',': advance(); push(TokenKind::Comma, start, sl, sc); break;
                 case '.': advance(); push(TokenKind::Dot, start, sl, sc); break;
+                case '@': advance(); push(TokenKind::At, start, sl, sc); break;
                 case '+': advance(); push(TokenKind::Plus, start, sl, sc); break;
                 case '-': advance(); push(TokenKind::Minus, start, sl, sc); break;
                 case '*': advance(); push(TokenKind::Star, start, sl, sc); break;
@@ -216,7 +217,7 @@ const char* token_kind_name(TokenKind kind) {
         case TokenKind::LParen: return "("; case TokenKind::RParen: return ")";
         case TokenKind::LBrace: return "{"; case TokenKind::RBrace: return "}";
         case TokenKind::LBracket: return "["; case TokenKind::RBracket: return "]";
-        case TokenKind::Comma: return ","; case TokenKind::Dot: return ".";
+        case TokenKind::Comma: return ","; case TokenKind::Dot: return "."; case TokenKind::At: return "@";
         case TokenKind::Equal: return "="; case TokenKind::EqualEqual: return "==";
         case TokenKind::Bang: return "!"; case TokenKind::BangEqual: return "!=";
         case TokenKind::Less: return "<"; case TokenKind::LessEqual: return "<=";

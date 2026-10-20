@@ -1,0 +1,323 @@
+; snow.c / snow.ffi
+
+; windows.h
+struct BITMAPINFOHEADER {
+    u32 biSize,
+    i32 biWidth,
+    i32 biHeight,
+    u16 biPlanes,
+    u16 biBitCount,
+    u32 biCompression,
+    u32 biSizeImage,
+    i32 biXPelsPerMeter,
+    i32 biYPelsPerMeter,
+    u32 biClrUsed,
+    u32 biClrImportant,
+}
+struct RGBQUAD {
+    u8 rgbBlue,
+    u8 rgbGreen,
+    u8 rgbRed,
+    u8 rgbReserved,
+}
+struct BITMAPINFO {
+    BITMAPINFOHEADER bmiHeader,
+    RGBQUAD          bmiColors[1],
+}
+struct RECT {
+    i32 left,
+    i32 top,
+    i32 right,
+    i32 bottom,
+}
+struct PAINTSTRUCT {
+    ptr  hdc,
+    i32  fErase,
+    RECT rcPaint,
+    i32  fRestore,
+    i32  fIncUpdate,
+    u8   rgbReserved[32],
+}
+struct WNDCLASSA {
+    u32 style,
+    ptr lpfnWndProc,
+    i32 cbClsExtra,
+    i32 cbWndExtra,
+    ptr hInstance,
+    ptr hIcon,
+    ptr hCursor,
+    ptr hbrBackground,
+    str lpszMenuName,
+    str lpszClassName,
+}
+struct POINT {
+    i32 x,
+    i32 y,
+}
+struct TRIVERTEX {
+    i32 x,
+    i32 y,
+    u16 Red,
+    u16 Green,
+    u16 Blue,
+    u16 Alpha,
+}
+struct GRADIENT_RECT {
+    u32 UpperLeft,
+    u32 LowerRight,
+}
+struct MSG {
+    ptr   hwnd,
+    u32   message,
+    u64   wParam,
+    i64   lParam,
+    u32   time,
+    POINT pt,
+    u32   lPrivate,
+}
+$SRCCOPY = u32 0x00CC0020
+$BI_RGB = u32 0
+$DIB_RGB_COLORS = u32 0
+$IDC_ARROW = ptr 32512
+$WS_OVERLAPPEDWINDOW = u32 0x00CF0000
+$CW_USEDEFAULT = i32 -2147483648
+$SW_SHOW = i32 5
+$WM_CREATE = u32 0x0001
+$WM_SIZE = u32 0x0005
+$WM_TIMER = u32 0x0113
+$WM_PAINT = u32 0x000F
+$WM_DESTROY = u32 0x0002
+$GRADIENT_FILL_RECT_V = u32 1
+
+; main file
+
+$MAX_FLAKES = i32 1200
+$FLAKES_PER_10000_PIXELS = i32 10
+
+struct SnowFlake {
+    i32 x, i32 y,
+    i32 speed,
+    i32 size,
+}
+
+$memDC = ptr 0
+$hBitmap = ptr 0 $hBackground = ptr 0 $oldBitmap = ptr 0
+$snow_brush = ptr 0
+
+$buffer_width = i32 0 $buffer_height = i32 0
+$screen_width = i32 0 $screen_height = i32 0
+
+$current_flake_count = i32 0
+$flakes = SnowFlake[$MAX_FLAKES]
+$random_seed = u32 123456789
+
+; --- Utility Functions ---
+i32 compute_flake_count(i32 $width, i32 $height) {
+    $count = i32 $width * $height * $FLAKES_PER_10000_PIXELS / 10000
+    if ($count > $MAX_FLAKES) {
+        $count = $MAX_FLAKES
+    }
+    return $count
+}
+
+i32 jolly_random() {
+    $random_seed = $random_seed * 1103515245 + 12345
+    return ($random_seed >> 16) & 0x7FFF
+}
+
+; --- Snow Functions ---
+void initialise_weather() {
+    $current_flake_count = compute_flake_count($screen_width, $screen_height)
+    $i = i32 0
+    while ($i < $current_flake_count) {
+        $flakes[$i].x = jolly_random() % $screen_width
+        $flakes[$i].y = jolly_random() % $screen_height
+        $flakes[$i].speed = 1 + (jolly_random() % 3)
+        $flakes[$i].size = 2 + (jolly_random() % 4)
+        $i = $i + 1
+    }
+}
+
+void update_weather() {
+    $i = i32 0
+    while ($i < $current_flake_count) {
+        $flakes[$i].y = $flakes[$i].y + $flakes[$i].speed
+        if ($flakes[$i].y >= $screen_height) {
+            $flakes[$i].y = 0
+            $flakes[$i].x = jolly_random() % $screen_width
+        }
+        $i = $i + 1
+    }
+}
+
+void reset_snow_positions() {
+    $current_flake_count = compute_flake_count($screen_width, $screen_height)
+    $i = i32 0
+    while ($i < $current_flake_count) {
+        $flakes[$i].x = jolly_random() % $screen_width
+        $flakes[$i].y = jolly_random() % $screen_height
+        $flakes[$i].speed = 1 + (jolly_random() % 3)
+        $flakes[$i].size = 2 + (jolly_random() % 4)
+        $i = $i + 1
+    }
+}
+
+; --- Drawing Functions ---
+void draw_sky(ptr $dc, i32 $width, i32 $height) {
+    if ($hBackground) { gdi32.dll i32 DeleteObject(ptr $hBackground) }
+
+    $bmi = BITMAPINFO {}
+    msvcrt.dll ptr memset(ptr &$bmi, i32 0, u64 sizeof($bmi))
+    $bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER)
+    $bmi.bmiHeader.biWidth = $width
+    $bmi.bmiHeader.biHeight = -$height ; top-down
+    $bmi.bmiHeader.biPlanes = 1
+    $bmi.bmiHeader.biBitCount = 32
+    $bmi.bmiHeader.biCompression = $BI_RGB
+
+    $pixels = ptr 0
+    $hBackground = gdi32.dll ptr CreateDIBSection(ptr $dc, ptr &$bmi, u32 $DIB_RGB_COLORS, ptr &$pixels, ptr 0, u32 0)
+    if (!$hBackground) { return }
+
+    $tempDC = gdi32.dll ptr CreateCompatibleDC(ptr $dc)
+    $old = gdi32.dll ptr SelectObject(ptr $tempDC, ptr $hBackground)
+
+    $vertices = TRIVERTEX[2] {}
+    $vertices[0].x = 0
+    $vertices[0].y = 0
+    $vertices[0].Blue = u16 (20 * 257)
+
+    $vertices[1].x = $width
+    $vertices[1].y = $height
+    $vertices[1].Blue = u16 (120 * 257)
+
+    $gradient = GRADIENT_RECT {}
+    $gradient.UpperLeft = 0
+    $gradient.LowerRight = 1
+
+    msimg32.dll i32 GradientFill(ptr $tempDC, ptr &$vertices, u32 2, ptr &$gradient, u32 1, u32 $GRADIENT_FILL_RECT_V)
+    gdi32.dll i32 BitBlt(ptr $dc, i32 0, i32 0, i32 $width, i32 $height, ptr $tempDC, i32 0, i32 0, u32 $SRCCOPY)
+    SelectObject($tempDC, $old)
+    gdi32.dll i32 DeleteDC(ptr $tempDC)
+}
+
+void create_buffer(ptr $hdc, i32 $width, i32 $height) {
+    if ($memDC) { DeleteDC($memDC) }
+    if ($hBitmap) { DeleteObject($hBitmap) }
+
+    $memDC = CreateCompatibleDC($hdc)
+    $hBitmap = gdi32.dll ptr CreateCompatibleBitmap(ptr $hdc, i32 $width, i32 $height)
+    $oldBitmap = SelectObject($memDC, $hBitmap)
+
+    $buffer_width = $width
+    $buffer_height = $height
+
+    draw_sky($memDC, $width, $height)
+}
+
+void draw_snow_frame() {
+    if (!$hBackground) { return }
+    $tempDC = CreateCompatibleDC($memDC)
+    $old = SelectObject($tempDC, $hBackground)
+    BitBlt($memDC, 0, 0, $buffer_width, $buffer_height, $tempDC, 0, 0, $SRCCOPY)
+    SelectObject($tempDC, $old)
+    DeleteDC($tempDC)
+
+    if (!$snow_brush) { $snow_brush = gdi32.dll ptr CreateSolidBrush(u32 0x00FFFFFF) }
+    $oldBrush = SelectObject($memDC, $snow_brush)
+
+    $i = i32 0
+    while ($i < $current_flake_count) {
+        gdi32.dll i32 Ellipse(ptr $memDC,
+                i32 $flakes[$i].x,
+                i32 $flakes[$i].y,
+                i32 $flakes[$i].x + $flakes[$i].size,
+                i32 $flakes[$i].y + $flakes[$i].size)
+        $i = $i + 1
+    }
+
+    SelectObject($memDC, $oldBrush)
+}
+
+; --- Window Procedure ---
+i64 WindowProc(ptr $hwnd, u32 $uMsg, u64 $wParam, i64 $lParam) {
+    switch ($uMsg) {
+    case $WM_CREATE {
+        $rect = RECT {}
+        user32.dll i32 GetClientRect(ptr $hwnd, ptr &$rect)
+        $screen_width = $rect.right - $rect.left
+        $screen_height = $rect.bottom - $rect.top
+        $dc = user32.dll ptr GetDC(ptr $hwnd)
+        create_buffer($dc, $screen_width, $screen_height)
+        user32.dll i32 ReleaseDC(ptr $hwnd, ptr $dc)
+        reset_snow_positions()
+        user32.dll u64 SetTimer(ptr $hwnd, u64 1, u32 16, ptr 0) ; ~60 FPS
+        return 0
+    }
+    case $WM_SIZE {
+        $screen_width = $lParam & 0xFFFF
+        $screen_height = ($lParam >> 16) & 0xFFFF
+        $dc = GetDC($hwnd)
+        create_buffer($dc, $screen_width, $screen_height)
+        ReleaseDC($hwnd, $dc)
+        reset_snow_positions()
+        return 0
+    }
+    case $WM_TIMER {
+        update_weather()
+        user32.dll i32 InvalidateRect(ptr $hwnd, ptr 0, i32 0)
+        return 0
+    }
+    case $WM_PAINT {
+        $ps = PAINTSTRUCT {}
+        $hdc = user32.dll ptr BeginPaint(ptr $hwnd, ptr &$ps)
+        draw_snow_frame()
+        BitBlt($hdc, 0, 0, $screen_width, $screen_height, $memDC, 0, 0, $SRCCOPY)
+        user32.dll i32 EndPaint(ptr $hwnd, ptr &$ps)
+        return 0
+    }
+    case $WM_DESTROY {
+        if ($memDC) { SelectObject($memDC, $oldBitmap) DeleteDC($memDC) }
+        if ($hBitmap) { DeleteObject($hBitmap) }
+        if ($hBackground) { DeleteObject($hBackground) }
+        if ($snow_brush) { DeleteObject($snow_brush) }
+        user32.dll void PostQuitMessage(i32 0)
+        return 0
+    }
+    }
+    return user32.dll i64 DefWindowProcA(ptr $hwnd, u32 $uMsg, u64 $wParam, i64 $lParam)
+}
+
+; --- Entry Point ---
+i32 WinMain(ptr $hInstance, ptr $hPrevInstance, str $lpCmdLine, i32 $nCmdShow) {
+    $wc = WNDCLASSA {}
+    $wc.lpfnWndProc = &WindowProc
+    $wc.hInstance = $hInstance
+    $wc.lpszClassName = "SnowClass"
+    $wc.hCursor = user32.dll ptr LoadCursorA(ptr 0, ptr $IDC_ARROW)
+    user32.dll u16 RegisterClassA(ptr &$wc);
+
+    $hwnd = user32.dll ptr CreateWindowExA(u32 0,
+        str "SnowClass", str "It's beginning to look a lot like Christmas..",
+        u32 $WS_OVERLAPPEDWINDOW,
+        i32 $CW_USEDEFAULT, i32 $CW_USEDEFAULT, i32 800, i32 600,
+        ptr 0, ptr 0, ptr $hInstance, ptr 0
+    )
+
+    user32.dll i32 ShowWindow(ptr $hwnd, i32 $nCmdShow);
+
+    $msg = MSG {}
+    while (user32.dll i32 GetMessageA(ptr &$msg, ptr 0, u32 0, u32 0)) {
+        user32.dll i32 TranslateMessage(ptr &$msg)
+        user32.dll i64 DispatchMessageA(ptr &$msg)
+    }
+
+    return 0
+}
+
+$hinst = kernel32.dll ptr GetModuleHandleA(ptr 0)
+$hprevinst = ptr 0
+$cmdline = str ""
+$cmdshow = i32 $SW_SHOW
+$ret = WinMain($hinst, $hprevinst, $cmdline, $cmdshow)
+quit()

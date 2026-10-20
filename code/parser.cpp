@@ -79,6 +79,28 @@ private:
         return array;
     }
 
+    std::unique_ptr<TypeSyntax> wrap_array_type(std::unique_ptr<TypeSyntax> element, std::unique_ptr<Expr> count,
+                                                const Token& close) {
+        auto array = std::make_unique<TypeSyntax>();
+        array->kind = TypeSyntax::Kind::Array;
+        array->element_type = std::move(element);
+        array->element_count_expr = std::move(count);
+        array->span = merge_spans(array->element_type->span, close.span);
+        return array;
+    }
+
+    std::unique_ptr<TypeSyntax> parse_array_suffix(std::unique_ptr<TypeSyntax> element) {
+        if (at(TokenKind::Integer) && at(TokenKind::RBracket, 1)) {
+            const Token& count = advance();
+            const Token& close = consume(TokenKind::RBracket, "expected ']' after array size");
+            return wrap_array_type(std::move(element), count, close);
+        }
+        if (at(TokenKind::RBracket)) fail("expected array element count expression");
+        auto count = parse_expression();
+        const Token& close = consume(TokenKind::RBracket, "expected ']' after array size expression");
+        return wrap_array_type(std::move(element), std::move(count), close);
+    }
+
     std::unique_ptr<TypeSyntax> parse_type_syntax(bool allow_anonymous = true) {
         std::unique_ptr<TypeSyntax> type;
         const SourceSpan start = peek().span;
@@ -100,11 +122,7 @@ private:
             type->span = name.span;
         }
 
-        while (match(TokenKind::LBracket)) {
-            const Token& count = consume(TokenKind::Integer, "expected array element count");
-            const Token& close = consume(TokenKind::RBracket, "expected ']' after array size");
-            type = wrap_array_type(std::move(type), count, close);
-        }
+        while (match(TokenKind::LBracket)) type = parse_array_suffix(std::move(type));
         return type;
     }
 
@@ -118,10 +136,8 @@ private:
             const Token& name = consume_identifier("expected field name");
             field.name = name.text;
             if (match(TokenKind::LBracket)) {
-                const Token& count = consume(TokenKind::Integer, "expected array element count");
-                const Token& close = consume(TokenKind::RBracket, "expected ']' after array size");
-                field.type = wrap_array_type(std::move(field.type), count, close);
-                field.span = merge_spans(start, close.span);
+                field.type = parse_array_suffix(std::move(field.type));
+                field.span = merge_spans(start, field.type->span);
             } else {
                 field.span = merge_spans(start, name.span);
             }
@@ -189,6 +205,51 @@ private:
         return stmt;
     }
 
+    std::unique_ptr<Stmt> parse_switch_statement() {
+        const SourceSpan start = tokens_[pos_ - 1].span;
+        auto stmt = std::make_unique<Stmt>();
+        stmt->kind = StmtKind::Switch;
+
+        consume(TokenKind::LParen, "expected '(' after switch");
+        stmt->expr = parse_expression();
+        consume(TokenKind::RParen, "expected ')' after switch expression");
+        consume(TokenKind::LBrace, "expected '{' after switch expression");
+
+        bool saw_default = false;
+        while (!at(TokenKind::RBrace)) {
+            if (at(TokenKind::Eof)) throw IncompleteInput{};
+
+            SwitchArm arm;
+            if (match_keyword("case")) {
+                if (saw_default) fail("case cannot appear after default in switch", tokens_[pos_ - 1].span);
+                const SourceSpan arm_start = tokens_[pos_ - 1].span;
+                arm.values.push_back(parse_expression());
+                while (match(TokenKind::Comma)) {
+                    if (at(TokenKind::LBrace)) fail("expected case expression after ','");
+                    arm.values.push_back(parse_expression());
+                }
+                auto block = parse_block();
+                arm.body = std::move(block->body);
+                arm.span = merge_spans(arm_start, block->span);
+            } else if (match_keyword("default")) {
+                if (saw_default) fail("duplicate default in switch", tokens_[pos_ - 1].span);
+                saw_default = true;
+                const SourceSpan arm_start = tokens_[pos_ - 1].span;
+                arm.is_default = true;
+                auto block = parse_block();
+                arm.body = std::move(block->body);
+                arm.span = merge_spans(arm_start, block->span);
+            } else {
+                fail("expected 'case' or 'default' in switch");
+            }
+            stmt->switch_arms.push_back(std::move(arm));
+        }
+
+        const Token& close = advance();
+        stmt->span = merge_spans(start, close.span);
+        return stmt;
+    }
+
     std::unique_ptr<Stmt> parse_statement(bool top_level) {
         if (is_aggregate_definition_start()) return parse_aggregate_definition();
         if (top_level && looks_like_function_definition()) return parse_function_definition();
@@ -212,6 +273,8 @@ private:
             stmt->span = merge_spans(start, end);
             return stmt;
         }
+
+        if (match_keyword("switch")) return parse_switch_statement();
 
         if (match_keyword("while")) {
             const SourceSpan start = tokens_[pos_ - 1].span;
@@ -252,22 +315,31 @@ private:
             return stmt;
         }
 
+        if (keyword("case")) fail("'case' is only allowed directly inside switch");
+        if (keyword("default")) fail("'default' is only allowed directly inside switch");
+
         // Assignment gets priority at statement position. This is what lets places be
         // lvalues without making arbitrary expression statements legal.
         if (at(TokenKind::Variable) || looks_like_typed_memory_access_start()) {
             const size_t save = pos_;
+            std::unique_ptr<Expr> target;
             try {
-                auto target = parse_place_expression();
-                if (match(TokenKind::Equal)) {
-                    auto stmt = std::make_unique<Stmt>();
-                    stmt->kind = StmtKind::Assignment;
-                    stmt->target = std::move(target);
-                    stmt->value = parse_expression();
-                    stmt->span = merge_spans(stmt->target->span, stmt->value->span);
-                    return stmt;
-                }
+                target = parse_place_expression();
             } catch (const DiagnosticError&) {
                 // Reparse as a call/expression below, where the useful error is produced.
+                pos_ = save;
+                target.reset();
+            }
+            if (target && match(TokenKind::Equal)) {
+                auto stmt = std::make_unique<Stmt>();
+                stmt->kind = StmtKind::Assignment;
+                stmt->target = std::move(target);
+                // Once '=' has been consumed this is unambiguously an assignment.
+                // Preserve RHS diagnostics instead of rewinding and reporting the
+                // unrelated "only calls" expression-statement error.
+                stmt->value = parse_expression();
+                stmt->span = merge_spans(stmt->target->span, stmt->value->span);
+                return stmt;
             }
             pos_ = save;
         }
@@ -284,11 +356,17 @@ private:
     bool looks_like_typed_memory_access_start() const {
         if (!at(TokenKind::Identifier)) return false;
         size_t i = pos_ + 1;
-        while (i + 2 < tokens_.size() && tokens_[i].kind == TokenKind::LBracket &&
-               tokens_[i + 1].kind == TokenKind::Integer && tokens_[i + 2].kind == TokenKind::RBracket) {
-            i += 3;
+        while (i < tokens_.size() && tokens_[i].kind == TokenKind::LBracket) {
+            int depth = 0;
+            do {
+                if (tokens_[i].kind == TokenKind::LBracket) ++depth;
+                else if (tokens_[i].kind == TokenKind::RBracket) --depth;
+                else if (tokens_[i].kind == TokenKind::Eof) return false;
+                ++i;
+            } while (i < tokens_.size() && depth > 0);
+            if (depth != 0) return false;
         }
-        return i < tokens_.size() && tokens_[i].kind == TokenKind::Star;
+        return i < tokens_.size() && tokens_[i].kind == TokenKind::At;
     }
 
     std::unique_ptr<Expr> parse_place_expression() {
@@ -296,7 +374,7 @@ private:
         if (looks_like_typed_memory_access_start()) {
             const SourceSpan start = peek().span;
             auto type = parse_type_syntax(false);
-            consume(TokenKind::Star, "expected '*' after memory access type");
+            consume(TokenKind::At, "expected '@' after memory access type");
             auto d = std::make_unique<Expr>();
             d->kind = ExprKind::Deref;
             d->type = std::move(type);
@@ -386,7 +464,19 @@ private:
     std::unique_ptr<Expr> parse_postfix() {
         auto expr = parse_primary();
         while (true) {
-            if (match(TokenKind::Dot)) {
+            if (expr->kind == ExprKind::Variable && match(TokenKind::LParen)) {
+                const SourceSpan start = expr->span;
+                const std::string target = expr->text;
+                auto call = std::make_unique<Expr>();
+                call->kind = ExprKind::Call;
+                call->call_target = CallTargetKind::Variable;
+                call->target_name = target;
+                parse_call_arguments(*call);
+                const Token& close = consume(TokenKind::RParen, "expected ')' after call arguments");
+                call->explicit_signature = !call->args.empty() && call->args.front().explicitly_typed;
+                call->span = merge_spans(start, close.span);
+                expr = std::move(call);
+            } else if (match(TokenKind::Dot)) {
                 const Token& member = consume_identifier("expected member name after '.'");
                 auto m = std::make_unique<Expr>();
                 m->kind = ExprKind::Member; m->lhs = std::move(expr); m->text = member.text;
@@ -486,9 +576,9 @@ private:
         auto type = parse_type_syntax(false);
         const bool builtin_type = type->kind == TypeSyntax::Kind::Named && is_builtin_type_name(type->name);
 
-        // A type followed by '*' is a typed memory access. The address expression's
+        // A type followed by '@' is a typed memory access. The address expression's
         // raw scalar bits are used as the address; the type controls only the access.
-        if (match(TokenKind::Star)) {
+        if (match(TokenKind::At)) {
             auto node = std::make_unique<Expr>();
             node->kind = ExprKind::Deref;
             node->type = std::move(type);
@@ -500,6 +590,16 @@ private:
         if (at(TokenKind::LBrace)) {
             if (type->kind == TypeSyntax::Kind::Array) return parse_array_initializer(std::move(type), start);
             return parse_aggregate_initializer(std::move(type), start);
+        }
+
+        // An array type by itself is an automatic array allocation. Without an
+        // initializer the storage is intentionally left uninitialized.
+        if (type->kind == TypeSyntax::Kind::Array) {
+            auto node = std::make_unique<Expr>();
+            node->kind = ExprKind::Array;
+            node->span = type->span;
+            node->type = std::move(type);
+            return node;
         }
 
         // Built-in type names are reserved. This keeps the typed-value form
@@ -552,6 +652,7 @@ private:
     std::unique_ptr<Expr> parse_array_initializer(std::unique_ptr<TypeSyntax> type, SourceSpan start) {
         auto node = std::make_unique<Expr>();
         node->kind = ExprKind::Array; node->type = std::move(type);
+        node->array_has_initializer = true;
         consume(TokenKind::LBrace, "expected '{' in array initializer");
         if (!at(TokenKind::RBrace)) {
             while (true) {
@@ -639,8 +740,15 @@ private:
 
         if (keyword("struct") || keyword("union")) {
             auto type = parse_type_syntax(true);
+            if (type->kind == TypeSyntax::Kind::Array) {
+                if (at(TokenKind::LBrace)) return parse_array_initializer(std::move(type), t.span);
+                auto node = std::make_unique<Expr>();
+                node->kind = ExprKind::Array;
+                node->span = type->span;
+                node->type = std::move(type);
+                return node;
+            }
             if (!at(TokenKind::LBrace)) fail("anonymous aggregate type in an expression must be immediately initialized", type->span);
-            if (type->kind == TypeSyntax::Kind::Array) return parse_array_initializer(std::move(type), t.span);
             return parse_aggregate_initializer(std::move(type), t.span);
         }
 

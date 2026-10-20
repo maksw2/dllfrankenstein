@@ -160,6 +160,52 @@ private:
         }
     }
 
+    uint32_t evaluate_array_count(Expr& expr) {
+        RuntimeValue value = eval(expr);
+        const TypeInfo& info = types_.get(value.type);
+        if (info.kind != RuntimeTypeKind::Primitive || !types_.is_integer(value.type))
+            throw DiagnosticError("array size expression must be an integer", expr.span);
+
+        bool positive = true;
+        uint64_t count = 0;
+        switch (info.primitive) {
+            case PrimitiveKind::I8: {
+                const int64_t n = static_cast<int8_t>(value.bits); positive = n > 0; count = static_cast<uint64_t>(n); break;
+            }
+            case PrimitiveKind::I16: {
+                const int64_t n = static_cast<int16_t>(value.bits); positive = n > 0; count = static_cast<uint64_t>(n); break;
+            }
+            case PrimitiveKind::I32: {
+                const int64_t n = static_cast<int32_t>(value.bits); positive = n > 0; count = static_cast<uint64_t>(n); break;
+            }
+            case PrimitiveKind::I64: {
+                const int64_t n = static_cast<int64_t>(value.bits); positive = n > 0; count = static_cast<uint64_t>(n); break;
+            }
+            case PrimitiveKind::U8: count = static_cast<uint8_t>(value.bits); positive = count != 0; break;
+            case PrimitiveKind::U16: count = static_cast<uint16_t>(value.bits); positive = count != 0; break;
+            case PrimitiveKind::U32: count = static_cast<uint32_t>(value.bits); positive = count != 0; break;
+            case PrimitiveKind::U64: count = value.bits; positive = count != 0; break;
+            default: positive = false; break;
+        }
+        if (!positive || count > UINT32_MAX)
+            throw DiagnosticError("array size must be between 1 and 2^32-1", expr.span);
+        return static_cast<uint32_t>(count);
+    }
+
+    TypeId materialize_type(TypeSyntax& syntax) {
+        if (syntax.kind != TypeSyntax::Kind::Array) return syntax.resolved;
+        const TypeInfo& checked = types_.get(syntax.resolved);
+        if (!checked.runtime_sized) return syntax.resolved;
+
+        const TypeId element = materialize_type(*syntax.element_type);
+        const uint32_t count = syntax.element_count_expr ? evaluate_array_count(*syntax.element_count_expr) : syntax.element_count;
+        try {
+            return types_.make_array(element, count);
+        } catch (const std::exception& e) {
+            throw DiagnosticError(e.what(), syntax.span);
+        }
+    }
+
     Place place(Expr& expr) {
         switch (expr.kind) {
             case ExprKind::Variable: {
@@ -185,7 +231,7 @@ private:
             case ExprKind::Deref: {
                 RuntimeValue address = eval(*expr.lhs);
                 if (address.bits == 0) throw DiagnosticError("null memory address", expr.span);
-                return {expr.type->resolved, reinterpret_cast<void*>(address.bits), nullptr};
+                return {materialize_type(*expr.type), reinterpret_cast<void*>(address.bits), nullptr};
             }
             default: break;
         }
@@ -241,6 +287,12 @@ private:
     bool truthy(RuntimeValue value) {
         if (types_.is_float(value.type)) return as_double(value) != 0.0;
         return value.bits != 0;
+    }
+
+    bool switch_equal(RuntimeValue subject, RuntimeValue candidate) {
+        candidate = cast(candidate, subject.type);
+        if (types_.is_float(subject.type)) return as_double(subject) == as_double(candidate);
+        return subject.bits == candidate.bits;
     }
 
     RuntimeValue eval_binary(Expr& expr) {
@@ -335,7 +387,10 @@ private:
             }
             return {void_type, 0, nullptr};
         }
-        if (expr.target_name == "quit") platform_fatal_exit(0);
+        if (expr.target_name == "quit") {
+            const int code = args.empty() ? 0 : static_cast<int>(static_cast<int32_t>(args[0].bits));
+            platform_fatal_exit(code);
+        }
         throw std::runtime_error("unknown intrinsic '" + expr.target_name + "'");
     }
 
@@ -357,9 +412,12 @@ private:
         } else if (expr.call_target == CallTargetKind::External) {
             target = runtime_.dlls().resolve_external(expr.module_name, expr.target_name);
         } else {
-            // Script functions always beat the focused DLL, including explicit-signature calls.
-            target = runtime_.function_address(expr.target_name);
-            if (!target) target = runtime_.dlls().resolve_focused(expr.target_name);
+            if (expr.checked_script_target) {
+                target = runtime_.function_address(expr.target_name);
+                if (!target) throw DiagnosticError("script function is not installed: '" + expr.target_name + "'", expr.span);
+            } else {
+                target = runtime_.dlls().resolve_focused(expr.target_name);
+            }
         }
         const uint64_t result = ffi_call_scalar(target, types_, expr.checked_return_type, expr.checked_arg_types, bits);
         return {expr.checked_return_type, result, nullptr};
@@ -415,10 +473,12 @@ private:
                 return {type, 0, memory};
             }
             case ExprKind::Array: {
-                const TypeId type = expr.type->resolved;
+                const TypeId type = materialize_type(*expr.type);
                 const TypeInfo& info = types_.get(type);
+                if (expr.elements.size() > info.element_count)
+                    throw DiagnosticError("too many elements in " + types_.name(type) + " initializer", expr.span);
                 void* memory = arena_.allocate(info.size, info.alignment);
-                std::memset(memory, 0, info.size);
+                if (expr.array_has_initializer) std::memset(memory, 0, info.size);
                 const TypeInfo& element = types_.get(info.element_type);
                 for (size_t i = 0; i < expr.elements.size(); ++i) {
                     store_place({info.element_type, static_cast<std::byte*>(memory) + i * element.size, nullptr}, eval(*expr.elements[i]));
@@ -426,7 +486,8 @@ private:
                 return {type, 0, memory};
             }
             case ExprKind::SizeOf: {
-                const TypeId type = expr.type ? expr.type->resolved : expr.lhs->checked_type;
+                TypeId type = expr.type ? materialize_type(*expr.type) : expr.lhs->checked_type;
+                if (!expr.type && types_.get(type).runtime_sized) type = place(*expr.lhs).type;
                 return {expr.checked_type, types_.get(type).size, nullptr};
             }
             case ExprKind::AlignOf: {
@@ -486,6 +547,39 @@ private:
                     scopes_.push_back({}); Flow flow = run(stmt.body); scopes_.pop_back(); return flow;
                 }
                 if (stmt.else_branch) return execute(*stmt.else_branch);
+                return {};
+            }
+            case StmtKind::Switch: {
+                const RuntimeValue subject = eval(*stmt.expr);
+                const SwitchArm* default_arm = nullptr;
+
+                for (auto& arm : stmt.switch_arms) {
+                    if (arm.is_default) {
+                        default_arm = &arm;
+                        continue;
+                    }
+
+                    bool matched = false;
+                    for (auto& value : arm.values) {
+                        if (switch_equal(subject, eval(*value))) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) continue;
+
+                    scopes_.push_back({});
+                    Flow flow = run(arm.body);
+                    scopes_.pop_back();
+                    return flow;
+                }
+
+                if (default_arm) {
+                    scopes_.push_back({});
+                    Flow flow = run(default_arm->body);
+                    scopes_.pop_back();
+                    return flow;
+                }
                 return {};
             }
             case StmtKind::While: {

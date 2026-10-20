@@ -34,6 +34,7 @@ struct TypeInfo {
     uint32_t pack = 8;
     TypeId element_type = INVALID_TYPE;
     uint32_t element_count = 0;
+    bool runtime_sized = false;
     std::vector<TypeField> fields;
 };
 
@@ -46,6 +47,7 @@ public:
     const TypeInfo& get(TypeId id) const;
 
     TypeId make_array(TypeId element, uint32_t count);
+    TypeId make_runtime_array(TypeId element);
     TypeId make_aggregate(bool is_union, std::string debug_name, uint32_t pack,
                           const std::vector<std::pair<std::string, TypeId>>& fields);
 
@@ -63,6 +65,7 @@ private:
     std::vector<std::unique_ptr<TypeInfo>> types_;
     std::unordered_map<std::string, TypeId> builtins_;
     std::unordered_map<uint64_t, TypeId> arrays_;
+    std::unordered_map<TypeId, TypeId> runtime_arrays_;
     TypeId primitive_ids_[14]{};
 
     TypeId add_primitive(PrimitiveKind kind, const char* name, uint32_t size, uint32_t alignment);

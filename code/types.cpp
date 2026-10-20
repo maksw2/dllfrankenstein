@@ -58,25 +58,50 @@ const TypeInfo& TypeRegistry::get(TypeId id) const {
 }
 
 TypeId TypeRegistry::make_array(TypeId element, uint32_t count) {
+    if (count == 0) throw std::runtime_error("array size must be between 1 and 2^32-1");
     const uint64_t key = (static_cast<uint64_t>(element) << 32) | count;
     {
         std::scoped_lock lock(mutex_);
         if (auto it = arrays_.find(key); it != arrays_.end()) return it->second;
     }
     const TypeInfo& e = get(element);
-    if (e.size != 0 && count > std::numeric_limits<uint32_t>::max() / e.size) throw std::runtime_error("array type is too large");
+    if (!e.runtime_sized && e.size != 0 && count > std::numeric_limits<uint32_t>::max() / e.size)
+        throw std::runtime_error("array type is too large");
     TypeInfo t;
     t.kind = RuntimeTypeKind::Array;
     t.debug_name = name(element) + "[" + std::to_string(count) + "]";
     t.element_type = element;
     t.element_count = count;
-    t.size = e.size * count;
+    t.runtime_sized = e.runtime_sized;
+    t.size = e.runtime_sized ? 0 : e.size * count;
     t.alignment = e.alignment;
     std::scoped_lock lock(mutex_);
     if (auto it = arrays_.find(key); it != arrays_.end()) return it->second;
     const TypeId id = static_cast<TypeId>(types_.size());
     types_.push_back(std::make_unique<TypeInfo>(std::move(t)));
     arrays_[key] = id;
+    return id;
+}
+
+TypeId TypeRegistry::make_runtime_array(TypeId element) {
+    {
+        std::scoped_lock lock(mutex_);
+        if (auto it = runtime_arrays_.find(element); it != runtime_arrays_.end()) return it->second;
+    }
+    const TypeInfo& e = get(element);
+    TypeInfo t;
+    t.kind = RuntimeTypeKind::Array;
+    t.debug_name = name(element) + "[*]";
+    t.element_type = element;
+    t.element_count = 0;
+    t.runtime_sized = true;
+    t.size = 0;
+    t.alignment = e.alignment;
+    std::scoped_lock lock(mutex_);
+    if (auto it = runtime_arrays_.find(element); it != runtime_arrays_.end()) return it->second;
+    const TypeId id = static_cast<TypeId>(types_.size());
+    types_.push_back(std::make_unique<TypeInfo>(std::move(t)));
+    runtime_arrays_[element] = id;
     return id;
 }
 

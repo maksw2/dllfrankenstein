@@ -16,7 +16,7 @@ std::optional<IntrinsicSignature> intrinsic_signature(const std::string& name) {
     if (name == "dlls") return IntrinsicSignature{PrimitiveKind::Void, {}};
     if (name == "address") return IntrinsicSignature{PrimitiveKind::Ptr, {PrimitiveKind::Str, PrimitiveKind::Str}};
     if (name == "hex") return IntrinsicSignature{PrimitiveKind::Void, {PrimitiveKind::Ptr, PrimitiveKind::U64}};
-    if (name == "quit") return IntrinsicSignature{PrimitiveKind::Void, {}};
+    if (name == "quit") return IntrinsicSignature{PrimitiveKind::Void, {PrimitiveKind::I32}};
     return std::nullopt;
 }
 
@@ -76,6 +76,12 @@ private:
         if (syntax.kind == TypeSyntax::Kind::Array) {
             TypeId element = resolve_type(*syntax.element_type);
             if (element == types_.primitive(PrimitiveKind::Void)) fail("array element type cannot be void", syntax.span);
+            if (syntax.element_count_expr) {
+                TypeId count = check_expression(*syntax.element_count_expr);
+                if (!types_.is_integer(count)) fail("array size expression must be an integer", syntax.element_count_expr->span);
+                syntax.resolved = types_.make_runtime_array(element);
+                return syntax.resolved;
+            }
             try { syntax.resolved = types_.make_array(element, syntax.element_count); }
             catch (const std::exception& e) { fail(e.what(), syntax.span); }
             return syntax.resolved;
@@ -85,7 +91,10 @@ private:
         std::unordered_set<std::string> names;
         for (auto& field : syntax.fields) {
             if (!names.insert(field.name).second) fail("duplicate field '" + field.name + "'", field.span);
-            fields.emplace_back(field.name, resolve_type(*field.type));
+            TypeId field_type = resolve_type(*field.type);
+            if (types_.get(field_type).runtime_sized)
+                fail("runtime-sized arrays are not allowed in aggregate fields", field.span);
+            fields.emplace_back(field.name, field_type);
         }
         const std::string debug = std::string(syntax.kind == TypeSyntax::Kind::AnonymousUnion ? "<anonymous union@" : "<anonymous struct@") +
                                   std::to_string(syntax.span.line) + ">";
@@ -97,7 +106,11 @@ private:
         return syntax.resolved;
     }
 
-    TypeId resolve_field_type(FieldSyntax& field) { return resolve_type(*field.type); }
+    TypeId resolve_field_type(FieldSyntax& field) {
+        TypeId type = resolve_type(*field.type);
+        if (types_.get(type).runtime_sized) fail("runtime-sized arrays are not allowed in aggregate fields", field.span);
+        return type;
+    }
 
     bool can_explicit_cast(TypeId from, TypeId to) const {
         if (from == to) return true;
@@ -148,22 +161,74 @@ private:
         fail("expression is not assignable", expr.span);
     }
 
-    TypeId check_call(Expr& expr) {
-        const bool pointer_target = expr.call_target == CallTargetKind::Variable;
-        if (pointer_target) {
-            const TypeId target_type = lookup_variable(expr.target_name, expr.span);
-            require_scalar(target_type, expr.span, "function pointer target");
+    void check_call_arguments(Expr& expr, const FunctionSignature& signature, const std::string& display_name) {
+        if (expr.args.size() != signature.parameters.size())
+            fail("wrong number of arguments to '" + display_name + "'", expr.span);
+        expr.checked_return_type = signature.return_type;
+        expr.checked_arg_types = signature.parameters;
+        for (size_t i = 0; i < expr.args.size(); ++i) {
+            if (expr.args[i].explicitly_typed)
+                fail("remembered calls use untyped arguments; provide a return type to change the signature", expr.args[i].span);
+            TypeId actual = check_expression(*expr.args[i].value);
+            if (!can_explicit_cast(actual, signature.parameters[i]))
+                fail("argument " + std::to_string(i + 1) + " cannot be converted to " + types_.name(signature.parameters[i]), expr.args[i].span);
+            expr.args[i].checked_type = signature.parameters[i];
         }
+    }
+
+    void apply_ffi_origin(Expr& expr, const FfiBindingSignature& binding) {
+        expr.module_name.clear();
+        expr.target_name = binding.target_name;
+        switch (binding.origin) {
+            case FfiOriginKind::Focused:
+                expr.call_target = CallTargetKind::Named;
+                break;
+            case FfiOriginKind::External:
+                expr.call_target = CallTargetKind::External;
+                expr.module_name = binding.module_name;
+                break;
+            case FfiOriginKind::Variable:
+                expr.call_target = CallTargetKind::Variable;
+                break;
+        }
+    }
+
+    void remember_ffi_call(const Expr& expr, CallTargetKind original_target, const std::string& original_module,
+                           const std::string& original_name) {
+        FfiBindingSignature binding;
+        binding.signature.return_type = expr.checked_return_type;
+        binding.signature.parameters = expr.checked_arg_types;
+        binding.signature.span = expr.span;
+        binding.target_name = original_name;
+        binding.span = expr.span;
+        if (original_target == CallTargetKind::External) {
+            binding.origin = FfiOriginKind::External;
+            binding.module_name = original_module;
+        } else if (original_target == CallTargetKind::Variable) {
+            binding.origin = FfiOriginKind::Variable;
+        } else {
+            binding.origin = FfiOriginKind::Focused;
+        }
+        state_.ffi_functions[original_name] = std::move(binding);
+    }
+
+    TypeId check_call(Expr& expr) {
+        const CallTargetKind original_target = expr.call_target;
+        const std::string original_module = expr.module_name;
+        const std::string original_name = expr.target_name;
 
         auto intrinsic = expr.call_target == CallTargetKind::Named ? intrinsic_signature(expr.target_name) : std::nullopt;
-        if (intrinsic && expr.module_name.empty() && !pointer_target) {
+        if (intrinsic && expr.module_name.empty()) {
             expr.checked_intrinsic_target = true;
             const TypeId intrinsic_return = types_.primitive(intrinsic->result);
             if (expr.return_type) {
                 expr.checked_return_type = resolve_type(*expr.return_type);
                 if (expr.checked_return_type != intrinsic_return) fail("intrinsic return type is " + types_.name(intrinsic_return), expr.return_type->span);
             } else expr.checked_return_type = intrinsic_return;
-            if (expr.args.size() != intrinsic->args.size()) fail("wrong number of arguments to intrinsic '" + expr.target_name + "'", expr.span);
+            const bool optional_exit_code = expr.target_name == "quit";
+            if ((!optional_exit_code && expr.args.size() != intrinsic->args.size()) ||
+                (optional_exit_code && expr.args.size() > 1))
+                fail("wrong number of arguments to intrinsic '" + expr.target_name + "'", expr.span);
             for (size_t i = 0; i < expr.args.size(); ++i) {
                 TypeId expected = types_.primitive(intrinsic->args[i]);
                 TypeId actual;
@@ -189,19 +254,29 @@ private:
         }
 
         const bool args_typed = !expr.args.empty() && expr.args.front().explicitly_typed;
-        if (!expr.explicit_signature && !args_typed) {
-            if (!script) fail("untyped call requires a previously defined script function", expr.span);
-            if (expr.args.size() != script->parameters.size()) fail("wrong number of arguments to '" + expr.target_name + "'", expr.span);
-            expr.checked_script_target = true;
-            expr.checked_return_type = script->return_type;
-            expr.checked_arg_types = script->parameters;
-            for (size_t i = 0; i < expr.args.size(); ++i) {
-                TypeId actual = check_expression(*expr.args[i].value);
-                if (!can_explicit_cast(actual, script->parameters[i]))
-                    fail("argument " + std::to_string(i + 1) + " cannot be converted to " + types_.name(script->parameters[i]), expr.args[i].span);
-                expr.args[i].checked_type = script->parameters[i];
+        const bool has_explicit_return = expr.return_type != nullptr;
+        const bool untyped_call = !expr.explicit_signature && !args_typed && !has_explicit_return;
+
+        if (untyped_call) {
+            // A script function with the same bare name always wins over a remembered
+            // FFI binding. Function-pointer calls have their own `$name` namespace.
+            if (script) {
+                expr.checked_script_target = true;
+                check_call_arguments(expr, *script, expr.target_name);
+            } else {
+                auto known = state_.ffi_functions.find(original_name);
+                if (known == state_.ffi_functions.end()) fail("no known function '" + original_name + "'", expr.span);
+                apply_ffi_origin(expr, known->second);
+                if (expr.call_target == CallTargetKind::Variable) {
+                    const TypeId target_type = lookup_variable(expr.target_name, expr.span);
+                    require_scalar(target_type, expr.span, "function pointer target");
+                }
+                check_call_arguments(expr, known->second.signature, original_name);
             }
         } else {
+            // Explicitly typed calls still use a same-name script function when one
+            // is already known. Otherwise a complete signature declares/redeclares
+            // the remembered FFI binding for this name and origin.
             if (expr.return_type) expr.checked_return_type = resolve_type(*expr.return_type);
             else {
                 if (!script) fail("typed arguments without an explicit return type require a script function", expr.span);
@@ -217,6 +292,14 @@ private:
                 expr.checked_arg_types.push_back(arg.checked_type);
             }
             expr.checked_script_target = script != nullptr && expr.call_target == CallTargetKind::Named;
+
+            if (expr.call_target == CallTargetKind::Variable) {
+                const TypeId target_type = lookup_variable(expr.target_name, expr.span);
+                require_scalar(target_type, expr.span, "function pointer target");
+            }
+
+            if (!expr.checked_script_target && has_explicit_return)
+                remember_ffi_call(expr, original_target, original_module, original_name);
         }
         expr.checked_type = expr.checked_return_type;
         return expr.checked_type;
@@ -335,7 +418,7 @@ private:
                 TypeId array = resolve_type(*expr.type);
                 const TypeInfo& info = types_.get(array);
                 if (info.kind != RuntimeTypeKind::Array) fail("array initializer requires an array type", expr.span);
-                if (expr.elements.size() > info.element_count)
+                if (!expr.type->element_count_expr && expr.elements.size() > info.element_count)
                     fail("too many elements in " + types_.name(array) + " initializer", expr.span);
                 for (auto& element : expr.elements) {
                     TypeId actual = check_expression(*element);
@@ -389,6 +472,15 @@ private:
                 for (const auto& child : stmt.body) { if (definitely_returns(*child)) { then_returns = true; break; } }
                 return then_returns && definitely_returns(*stmt.else_branch);
             }
+            case StmtKind::Switch: {
+                bool has_default = false;
+                if (stmt.switch_arms.empty()) return false;
+                for (const auto& arm : stmt.switch_arms) {
+                    has_default = has_default || arm.is_default;
+                    if (!body_definitely_returns(arm.body)) return false;
+                }
+                return has_default;
+            }
             default: return false;
         }
     }
@@ -417,8 +509,13 @@ private:
         const bool saved_in_function = in_function_;
         const TypeId saved_return = function_return_;
         const int saved_loop = loop_depth_;
+        // Snapshot the globals visible at this point in the current module.
+        // state_.variables only contains globals from the incoming semantic snapshot;
+        // top-level assignments checked earlier in this module live in
+        // variable_scopes_.front() until run() finishes.
+        const auto visible_globals = variable_scopes_.front();
         variable_scopes_.clear();
-        variable_scopes_.push_back(state_.variables); // snapshot globals; body checking cannot mutate outer semantic state
+        variable_scopes_.push_back(visible_globals); // body checking cannot mutate outer semantic state
         variable_scopes_.push_back({});
         for (const auto& p : stmt.parameters) {
             if (variable_scopes_.front().contains(p.name)) fail("parameter '" + p.name + "' would shadow a global variable; rename it", p.span);
@@ -481,6 +578,32 @@ private:
                 variable_scopes_.pop_back();
                 if (stmt.else_branch) check_statement(*stmt.else_branch, false);
                 break;
+            case StmtKind::Switch: {
+                const TypeId subject = check_expression(*stmt.expr);
+                if (!types_.is_scalar(subject)) fail("switch expression must be scalar", stmt.expr->span);
+
+                // Case expressions are runtime expressions. Check all of them against
+                // the switch subject before checking any arm bodies, since an
+                // unmatched arm body cannot affect evaluation of later cases.
+                for (auto& arm : stmt.switch_arms) {
+                    for (auto& value : arm.values) {
+                        const TypeId case_type = check_expression(*value);
+                        if (!types_.is_scalar(case_type)) fail("case expression must be scalar", value->span);
+                        if (!can_explicit_cast(case_type, subject))
+                            fail("case expression cannot be converted to " + types_.name(subject), value->span);
+                    }
+                }
+
+                const auto before_switch = variable_scopes_;
+                for (auto& arm : stmt.switch_arms) {
+                    variable_scopes_ = before_switch;
+                    variable_scopes_.push_back({});
+                    for (auto& s : arm.body) check_statement(*s, false);
+                    variable_scopes_.pop_back();
+                }
+                variable_scopes_ = before_switch;
+                break;
+            }
             case StmtKind::While:
                 if (!types_.is_scalar(check_expression(*stmt.expr))) fail("while condition must be scalar", stmt.expr->span);
                 ++loop_depth_;

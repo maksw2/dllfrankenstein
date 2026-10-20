@@ -89,6 +89,7 @@ public:
     bool quiet() const { return quiet_; }
 
     SemanticSnapshot semantic_snapshot() const;
+    void install_ffi_bindings(const std::unordered_map<std::string, FfiBindingSignature>& bindings);
     void install_named_type(const std::string& name, TypeId type);
 
     Binding* find_global(const std::string& name) const;
@@ -117,6 +118,7 @@ private:
     std::vector<std::unique_ptr<Binding>> global_bindings_;
     std::unordered_map<std::string, Binding*> globals_;
     std::unordered_map<std::string, TypeId> named_types_;
+    std::unordered_map<std::string, FfiBindingSignature> ffi_functions_;
 
     std::array<FunctionSlot, 256> function_slots_{};
     std::unordered_map<std::string, uint32_t> function_names_;

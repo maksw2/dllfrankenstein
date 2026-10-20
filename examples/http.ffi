@@ -59,7 +59,7 @@ while (1) {
         continue
     }
 
-    u8 *($req_buf + $received) = 0
+    u8 @($req_buf + $received) = 0
 
     ; Request starts with "GET /". strtok terminates the path at the following space.
     $filename = $req_buf + 5

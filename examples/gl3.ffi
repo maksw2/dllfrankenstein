@@ -10,7 +10,7 @@ struct WNDCLASSA {
     ptr hIcon,
     ptr hCursor,
     ptr hbrBackground,
-    ptr lpszMenuName,
+    str lpszMenuName,
     str lpszClassName,
 }
 
@@ -77,7 +77,7 @@ $GL_FLOAT            = u32 0x1406
 
 $instance = kernel32.dll ptr GetModuleHandleA(ptr 0)
 assert($instance != 0, "GetModuleHandleA")
-$cursor = user32.dll ptr LoadCursorA(ptr 0, i64 32512)
+$cursor = user32.dll ptr LoadCursorA(ptr 0, ptr 32512)
 $class_name = str "NativeGLClass"
 
 $wc = WNDCLASSA {

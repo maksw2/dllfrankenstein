@@ -22,10 +22,12 @@ struct FieldSyntax {
 
 struct TypeSyntax {
     enum class Kind { Named, AnonymousStruct, AnonymousUnion, Array } kind = Kind::Named;
+    ~TypeSyntax();
     std::string name;
     std::vector<FieldSyntax> fields;
     std::unique_ptr<TypeSyntax> element_type;
     uint32_t element_count = 0;
+    std::unique_ptr<Expr> element_count_expr;
     uint32_t pack = 8;
     bool explicit_pack = false;
     SourceSpan span{};
@@ -97,14 +99,18 @@ struct Expr {
     std::unique_ptr<TypeSyntax> type;
     std::vector<InitField> initializers;
     std::vector<std::unique_ptr<Expr>> elements;
+    bool array_has_initializer = false;
     std::vector<std::string> member_path;
 };
+
+inline TypeSyntax::~TypeSyntax() = default;
 
 enum class StmtKind {
     Assignment,
     Call,
     Block,
     If,
+    Switch,
     While,
     Break,
     Continue,
@@ -113,6 +119,13 @@ enum class StmtKind {
     StructDefinition,
     UnionDefinition,
     FunctionDefinition,
+};
+
+struct SwitchArm {
+    bool is_default = false;
+    std::vector<std::unique_ptr<Expr>> values;
+    std::vector<std::unique_ptr<Stmt>> body;
+    SourceSpan span{};
 };
 
 struct ParameterSyntax {
@@ -136,6 +149,7 @@ struct Stmt {
     // Block and control flow.
     std::vector<std::unique_ptr<Stmt>> body;
     std::unique_ptr<Stmt> else_branch;
+    std::vector<SwitchArm> switch_arms;
 
     // Named aggregate definition.
     std::string name;

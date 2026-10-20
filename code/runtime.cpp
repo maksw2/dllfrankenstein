@@ -31,7 +31,10 @@ void* FrameArena::allocate(size_t size, size_t alignment) {
     if (!chunks_.empty()) if (void* p = try_chunk(chunks_.back())) return p;
     const size_t capacity = std::max<size_t>(64 * 1024, size + alignment);
     Chunk chunk;
-    chunk.bytes = std::make_unique<std::byte[]>(capacity);
+    // The arena itself does not initialize storage. Callers that require zeroed
+    // memory do so explicitly; this lets `T[N]` model an uninitialized automatic
+    // array while `T[N] {}` remains explicitly zero-initialized.
+    chunk.bytes.reset(new std::byte[capacity]);
     chunk.capacity = capacity;
     chunks_.push_back(std::move(chunk));
     void* p = try_chunk(chunks_.back());
@@ -134,11 +137,17 @@ SemanticSnapshot Runtime::semantic_snapshot() const {
     std::scoped_lock lock(metadata_mutex_);
     SemanticSnapshot snapshot;
     snapshot.named_types = named_types_;
+    snapshot.ffi_functions = ffi_functions_;
     for (const auto& [name, binding] : globals_) snapshot.variables[name] = binding->type.load(std::memory_order_acquire);
     for (const auto& [name, slot_index] : function_names_) {
         if (FunctionVersion* version = function_slots_[slot_index].current.load(std::memory_order_acquire)) snapshot.functions[name] = version->signature;
     }
     return snapshot;
+}
+
+void Runtime::install_ffi_bindings(const std::unordered_map<std::string, FfiBindingSignature>& bindings) {
+    std::scoped_lock lock(metadata_mutex_);
+    ffi_functions_ = bindings;
 }
 
 void Runtime::install_named_type(const std::string& name, TypeId type) {

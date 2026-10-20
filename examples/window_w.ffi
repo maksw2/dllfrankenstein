@@ -7,7 +7,7 @@ struct WNDCLASSW {
     ptr hIcon,
     ptr hCursor,
     ptr hbrBackground,
-    ptr lpszMenuName,
+    wstr lpszMenuName,
     wstr lpszClassName,
 }
 
@@ -34,7 +34,7 @@ i64 WindowProc(ptr $hwnd, u32 $msg, u64 $wparam, i64 $lparam) {
 }
 
 $instance = kernel32.dll ptr GetModuleHandleW(ptr 0)
-$cursor = user32.dll ptr LoadCursorW(ptr 0, i64 32512)
+$cursor = user32.dll ptr LoadCursorW(ptr 0, ptr 32512)
 $class_name = wstr "dllfrankenstein-window-w"
 $window_name = wstr "dllfrankenstein wide"
 

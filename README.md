@@ -50,13 +50,13 @@ VALUES AND VARIABLES
   $p = ptr &$x
   $next = $p + 8
   $bytes = $end - $begin
-  $v = i32 *$p
-  i32 *$p = $v
+  $v = i32 @$p
+  i32 @$p = $v
 
   Blocks create variable scopes. Assigning an existing name redefines that variable in
   the scope where it already exists. New names are created in the current scope.
   Scalar variables adopt the value and type of the right-hand side when assigned.
-  i32 $x numerically converts $x; i32 *&$x reads the same storage as i32 instead.
+  i32 $x numerically converts $x; i32 @&$x reads the same storage as i32 instead.
   Pointer arithmetic is always in bytes.
 
 FUNCTIONS
@@ -66,13 +66,17 @@ FUNCTIONS
 
   add(1, 2) - call a previously defined script function
   i32 add(i32 1, i32 2) - call with a caller-provided signature
-  i32 SomeExport(i32 1) - call the focused DLL, unless a script function has that name
-  user32.dll i32 SomeExport(i32 1) - call a specific DLL
-  i32 $fn(i32 1) - call an address stored in a variable
+  i32 SomeExport(i32 1) - call the focused DLL and remember its signature/origin
+  user32.dll i32 SomeExport(i32 1) - call a specific DLL and remember it as the origin
+  SomeExport(2) - reuse the remembered FFI signature and origin
+  i32 $fn(i32 1) - call an address stored in a variable and remember its signature/origin
+  $fn(2) - reuse the remembered signature while reading the current address from $fn
   &add - get the function's address
 
-  Untyped calls require a previously defined script function.
-  Script functions take priority over symbols in the focused DLL.
+  A fully typed FFI call declares/redeclares a global remembered call descriptor.
+  Later untyped calls convert arguments to that signature and reuse its DLL/variable origin.
+  A same-name script function takes priority over a remembered FFI function for bare named calls.
+  An unknown bare call reports: no known function 'Name'.
   Redefining a function does not change its memory position.
 
 STRUCTS, UNIONS, ARRAYS
@@ -113,19 +117,27 @@ STRUCTS, UNIONS, ARRAYS
 
 ARRAYS
   $vertices = f32[6] { -0.5, -0.5, 0.5, -0.5, 0.0, 0.5 }
-  $scratch = u8[4096] {} - omitted elements are zeroed
+  $flakes = SnowFlake[$MAX_FLAKES] - runtime-sized, uninitialized storage
+  $scratch = u8[4096] {} - an initializer zeroes omitted elements
   $vertices[2] = 0.25
   $x = $vertices[2]
   sizeof($vertices) - total byte size of the array
   &$vertices - address of the array storage
 
-  Arrays are fixed-size values with automatic storage for local variables.
-  Array initializer elements are comma-separated and converted to the element type.
-  [N] is part of the type, so sizeof(f32[6]) and f32[6] *$address are also valid.
+  Array extents may be integer expressions and are evaluated when the array is allocated.
+  No initializer leaves array storage uninitialized; {} explicitly zero-initializes it.
+  Array initializer elements are comma-separated, converted to the element type, and the remainder is zeroed.
+  [N] is part of the type, so sizeof(f32[6]), sizeof(i32[$n]), and f32[6] @$address are valid.
+  Runtime-sized arrays cannot be aggregate fields because aggregate layout must remain fixed.
 
 CONTROL FLOW
   if ($x) { ... }
   if ($x) { ... } else if ($y) { ... } else { ... }
+  switch ($x) {
+    case $a { ... }
+    case 2, $b + 1 { ... }
+    default { ... }
+  }
   while ($x) { ... }
   break
   continue
@@ -134,7 +146,10 @@ CONTROL FLOW
   assert($condition)
   assert($condition, "message")
 
-  if and while bodies require braces. Zero is false; nonzero is true.
+  if, switch arms, and while bodies require braces. Zero is false; nonzero is true.
+  switch evaluates its subject once, then case expressions left-to-right and top-to-bottom.
+  Case expressions are runtime scalar expressions, converted to the subject's current type before comparison.
+  The first matching arm runs; there is no fallthrough or required break. default is optional and must be last.
   break and continue are valid only inside while.
   return is valid only inside a function.
 
@@ -147,9 +162,9 @@ OPERATORS
   logical - && ||
 
 MEMORY
-  $value = i32 *$address - read an i32 from an address
-  i32 *$address = 123 - write an i32 to an address
-  f32 *($address + 4) = 1.0 - typed memory access may use any scalar address expression
+  $value = i32 @$address - read an i32 from an address
+  i32 @$address = 123 - write an i32 to an address
+  f32 @($address + 4) = 1.0 - typed memory access may use any scalar address expression
   hex($address, 64) - dump 64 bytes from an address
 
   The memory access type controls the width and interpretation of the access.
@@ -164,7 +179,7 @@ DLLS
   dlls() - list loaded DLLs; * marks the focused DLL
   address("foo.dll", "Symbol") - get an exported symbol address
   address("foo.dll", "#123") - get an export by ordinal
-  quit() - exit the interpreter or REPL
+  quit() or quit($code) - exit the interpreter or REPL with an optional i32 exit code
 ```
 
 ## examples
@@ -173,8 +188,8 @@ DLLS
 <summary><b>a simple messagebox</b></summary>
 
 ```
-invoke.exe user32.dll i32 MessageBoxA(voidptr 0, str "hi", str "title", u32 0)
-invoke.exe user32.dll i32 MessageBoxW(voidptr 0, wstr "hi", wstr "title", u32 0)
+invoke.exe user32.dll i32 MessageBoxA(ptr 0, str "hi", str "title", u32 0)
+invoke.exe user32.dll i32 MessageBoxW(ptr 0, wstr "hi", wstr "title", u32 0)
 ```
 
 </details>
@@ -197,34 +212,20 @@ idiots.
 C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
-> $a = msvcrt.dll voidptr malloc(u64 128) --assert=nonzero
-> /set $a i32 67
-Value at 0x1A7266E1360 (i32): 67
-> /get $a i32
-Read 0x1A7266E1360 (i32): 67
-> /set $a+4 i32 420
-Value at 0x1A7266E1364 (i32): 420
-> /hex $a 8
-Dump 0x1A7266E1360 (8 bytes):
-  0000: 43 00 00 00 A4 01 00 00                          |C.......|
-> msvcrt.dll void free(voidptr $a)
-> $b = msvcrt.dll voidptr malloc(u64 128) --assert=nonzero
-> /set $b str "hello, world!"
-Value at 0x1A7266E1360 (str): "hello, world!"
-> /get $b str
-Read 0x1A7266E1360 (str): "hello, world!"
-> /hex $b 128
-Dump 0x1A7266E1360 (128 bytes):
-  0000: 68 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00 00 00  |hello, world!...|
-  0010: 72 61 6D 20 46 69 6C 65 73 5C 43 6F 6D 6D 6F 6E  |ram Files\Common|
-  0020: 20 46 69 6C 65 73 00 43 6F 6D 6D 6F 6E 50 72 6F  | Files.CommonPro|
-  0030: 67 72 61 6D 46 69 6C 65 73 28 78 38 36 29 3D 43  |gramFiles(x86)=C|
-  0040: 3A 5C 50 72 6F 67 72 61 6D 20 46 69 6C 65 73 20  |:\Program Files |
-  0050: 28 78 38 36 29 5C 43 6F 6D 6D 6F 6E 20 46 69 6C  |(x86)\Common Fil|
-  0060: 65 73 00 43 6F 6D 6D 6F 6E 50 72 6F 67 72 61 6D  |es.CommonProgram|
-  0070: 57 36 34 33 32 3D 43 3A 5C 50 72 6F 67 72 61 6D  |W6432=C:\Program|
-> msvcrt.dll void free(voidptr $b)
-> /quit
+> $a = msvcrt.dll ptr malloc(u64 128)
+> assert($a)
+> i32 @$a = 67
+> i32 @($a + 4) = 420
+> $first = i32 @$a
+> $second = i32 @($a + 4)
+> hex($a, 8)
+> msvcrt.dll void free(ptr $a)
+> $b = malloc(128)
+> assert($b)
+> msvcrt.dll ptr strcpy(ptr $b, str "hello, world!")
+> hex($b, 16)
+> free($b)
+> quit()
 ```
 
 remember to memset your memory kids!
@@ -238,17 +239,12 @@ remember to memset your memory kids!
 C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
-> test.dll i32 Add(i32 0, i32 0) --print-result --assert=zero
-Result: 0
-> test.dll i32 Add(i32 9, i32 10) --print-result --assert=nonzero
-Result: 19
-> test.dll i32 Add(i32 0, i32 0) --print-result --assert=nonzero
-Result: 0
-Assertion failed for result: 0
-> test.dll i32 Add(i32 9, i32 10) --print-result --assert=zero
-Result: 19
-Assertion failed for result: 19
-> /quit
+> $result = test.dll i32 Add(i32 0, i32 0)
+> assert($result == 0)
+> $result = Add(9, 10)
+> assert($result == 19)
+> assert(Add(20, 22) == 42, "math broke")
+> quit()
 ```
 
 </details>
@@ -264,9 +260,9 @@ C:\Users\Administrator\Documents\dllfrankenstein>dumpbin /exports C:\Windows\Sys
 C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
 wilczurski's cool shit - repl
 Enter command or /quit to exit.
-> kernel32.dll void #1481(i32 5000)
-> kernel32.dll void #117(i32 750, i32 300)
-> /quit
+> kernel32.dll void #1481(u32 5000)
+> kernel32.dll i32 #117(u32 750, u32 300)
+> quit()
 ```
 
 </details>
@@ -298,7 +294,7 @@ Reason: Illegal Instruction
 [!!!] CRASH DETECTED DURING CALL [!!!]
 Exception Code: 0xC0000096
 Reason: Privileged Instruction
-> /quit
+> quit()
 ```
 
 </details>
@@ -323,6 +319,13 @@ Reason: Privileged Instruction
 <summary><b>creating a win32 window using wide strings</b></summary>
 
 ![alt text](readme-images/image-1.png)
+
+</details>
+
+<details>
+<summary><b>win32 snow</b></summary>
+
+![alt text](readme-images/image-8.png)
 
 </details>
 
