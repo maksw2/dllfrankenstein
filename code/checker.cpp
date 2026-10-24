@@ -285,10 +285,16 @@ private:
             if (!abi_type_supported(types_, expr.checked_return_type, true)) fail("call return type is not supported by the Win64 scalar ABI bridge", expr.span);
             for (auto& arg : expr.args) {
                 if (!arg.explicitly_typed) fail("cannot mix typed and untyped call arguments", arg.span);
-                arg.checked_type = resolve_type(*arg.type);
-                if (!abi_type_supported(types_, arg.checked_type, false)) fail("call argument type is not supported by the Win64 scalar ABI bridge", arg.span);
                 TypeId actual = check_expression(*arg.value);
-                if (!can_explicit_cast(actual, arg.checked_type)) fail("cannot cast explicit call argument to " + types_.name(arg.checked_type), arg.span);
+                if (arg.type) {
+                    arg.checked_type = resolve_type(*arg.type);
+                    if (!can_explicit_cast(actual, arg.checked_type)) fail("cannot cast explicit call argument to " + types_.name(arg.checked_type), arg.span);
+                } else {
+                    // Self-typed arguments such as i64 @&$value carry their ABI type
+                    // in the expression itself.
+                    arg.checked_type = actual;
+                }
+                if (!abi_type_supported(types_, arg.checked_type, false)) fail("call argument type is not supported by the Win64 scalar ABI bridge", arg.span);
                 expr.checked_arg_types.push_back(arg.checked_type);
             }
             expr.checked_script_target = script != nullptr && expr.call_target == CallTargetKind::Named;
@@ -481,6 +487,10 @@ private:
                 }
                 return has_default;
             }
+            case StmtKind::Try:
+                return body_definitely_returns(stmt.body) && body_definitely_returns(stmt.catch_body);
+            case StmtKind::Throw:
+                return true;
             default: return false;
         }
     }
@@ -602,6 +612,24 @@ private:
                     variable_scopes_.pop_back();
                 }
                 variable_scopes_ = before_switch;
+                break;
+            }
+            case StmtKind::Try: {
+                variable_scopes_.push_back({});
+                for (auto& s : stmt.body) check_statement(*s, false);
+                variable_scopes_.pop_back();
+
+                const TypeId exception_type = types_.lookup_builtin("NATIVE_EXCEPTION");
+                variable_scopes_.push_back({});
+                variable_scopes_.back()[stmt.catch_name] = exception_type;
+                for (auto& s : stmt.catch_body) check_statement(*s, false);
+                variable_scopes_.pop_back();
+                break;
+            }
+            case StmtKind::Throw: {
+                const TypeId exception_type = types_.lookup_builtin("NATIVE_EXCEPTION");
+                const TypeId value = check_expression(*stmt.expr);
+                if (value != exception_type) fail("throw requires a NATIVE_EXCEPTION value", stmt.expr->span);
                 break;
             }
             case StmtKind::While:

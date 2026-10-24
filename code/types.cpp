@@ -42,6 +42,56 @@ TypeRegistry::TypeRegistry() {
     add_primitive(PrimitiveKind::Ptr, "ptr", 8, 8);
     add_primitive(PrimitiveKind::Void, "void", 0, 1);
 
+    const TypeId u8 = primitive(PrimitiveKind::U8);
+    const TypeId u16 = primitive(PrimitiveKind::U16);
+    const TypeId u32 = primitive(PrimitiveKind::U32);
+    const TypeId u64 = primitive(PrimitiveKind::U64);
+    const TypeId i32 = primitive(PrimitiveKind::I32);
+    const TypeId i64 = primitive(PrimitiveKind::I64);
+    const TypeId ptr = primitive(PrimitiveKind::Ptr);
+
+    const TypeId m128a = make_aggregate(false, "M128A", 8, {
+        {"Low", u64}, {"High", i64},
+    });
+    builtins_["M128A"] = m128a;
+
+    const TypeId m128a8 = make_array(m128a, 8);
+    const TypeId m128a16 = make_array(m128a, 16);
+    const TypeId reserved96 = make_array(u8, 96);
+    const TypeId xmm_save = make_aggregate(false, "XMM_SAVE_AREA32", 8, {
+        {"ControlWord", u16}, {"StatusWord", u16}, {"TagWord", u8}, {"Reserved1", u8},
+        {"ErrorOpcode", u16}, {"ErrorOffset", u32}, {"ErrorSelector", u16}, {"Reserved2", u16},
+        {"DataOffset", u32}, {"DataSelector", u16}, {"Reserved3", u16},
+        {"MxCsr", u32}, {"MxCsr_Mask", u32},
+        {"FloatRegisters", m128a8}, {"XmmRegisters", m128a16}, {"Reserved4", reserved96},
+    });
+    builtins_["XMM_SAVE_AREA32"] = xmm_save;
+
+    const TypeId vectors = make_array(m128a, 26);
+    const TypeId context = make_aggregate(false, "CONTEXT", 8, {
+        {"P1Home", u64}, {"P2Home", u64}, {"P3Home", u64}, {"P4Home", u64}, {"P5Home", u64}, {"P6Home", u64},
+        {"ContextFlags", u32}, {"MxCsr", u32},
+        {"SegCs", u16}, {"SegDs", u16}, {"SegEs", u16}, {"SegFs", u16}, {"SegGs", u16}, {"SegSs", u16}, {"EFlags", u32},
+        {"Dr0", u64}, {"Dr1", u64}, {"Dr2", u64}, {"Dr3", u64}, {"Dr6", u64}, {"Dr7", u64},
+        {"Rax", u64}, {"Rcx", u64}, {"Rdx", u64}, {"Rbx", u64}, {"Rsp", u64}, {"Rbp", u64}, {"Rsi", u64}, {"Rdi", u64},
+        {"R8", u64}, {"R9", u64}, {"R10", u64}, {"R11", u64}, {"R12", u64}, {"R13", u64}, {"R14", u64}, {"R15", u64}, {"Rip", u64},
+        {"FltSave", xmm_save}, {"VectorRegister", vectors}, {"VectorControl", u64}, {"DebugControl", u64},
+        {"LastBranchToRip", u64}, {"LastBranchFromRip", u64}, {"LastExceptionToRip", u64}, {"LastExceptionFromRip", u64},
+    });
+    builtins_["CONTEXT"] = context;
+
+    const TypeId exception_info = make_array(u64, 15);
+    const TypeId exception_record = make_aggregate(false, "EXCEPTION_RECORD", 8, {
+        {"ExceptionCode", u32}, {"ExceptionFlags", u32}, {"ExceptionRecord", ptr}, {"ExceptionAddress", ptr},
+        {"NumberParameters", u32}, {"ExceptionInformation", exception_info},
+    });
+    builtins_["EXCEPTION_RECORD"] = exception_record;
+
+    const TypeId native_exception = make_aggregate(false, "NATIVE_EXCEPTION", 8, {
+        {"record", exception_record}, {"context", context}, {"thread_id", u32}, {"stack_recovered", i32},
+        {"record_count", u32}, {"record_chain_truncated", i32},
+    });
+    builtins_["NATIVE_EXCEPTION"] = native_exception;
 }
 
 TypeId TypeRegistry::primitive(PrimitiveKind kind) const { return primitive_ids_[static_cast<size_t>(kind)]; }

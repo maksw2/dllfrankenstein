@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -33,6 +34,7 @@ class ThreadInvocationScope {
 public:
     explicit ThreadInvocationScope(Runtime& runtime) {
         if (g_thread_state.runtime && g_thread_state.runtime != &runtime) throw std::runtime_error("OS thread is already attached to another runtime");
+        if (g_thread_state.invocation_depth == 0) platform_prepare_thread_exception_handling();
         g_thread_state.runtime = &runtime;
         ++g_thread_state.invocation_depth;
     }
@@ -70,6 +72,137 @@ private:
     FrameArena arena_;
     std::vector<std::unordered_map<std::string, Binding*>> scopes_;
     std::vector<std::unique_ptr<Binding>> bindings_;
+
+    Flow run_scoped(const std::vector<std::unique_ptr<Stmt>>& statements) {
+        scopes_.push_back({});
+        try {
+            Flow flow = run(statements);
+            scopes_.pop_back();
+            return flow;
+        } catch (...) {
+            scopes_.pop_back();
+            throw;
+        }
+    }
+
+    const TypeField& require_field(TypeId aggregate, const char* name) const {
+        const TypeInfo& info = types_.get(aggregate);
+        auto it = std::find_if(info.fields.begin(), info.fields.end(), [&](const TypeField& field) { return field.name == name; });
+        if (it == info.fields.end()) throw std::runtime_error(std::string("missing builtin exception field '") + name + "'");
+        return *it;
+    }
+
+    void* field_address(void* aggregate, TypeId type, const char* name) const {
+        const TypeField& field = require_field(type, name);
+        return static_cast<std::byte*>(aggregate) + field.offset;
+    }
+
+    uint64_t read_scalar_bytes(const void* address, TypeId type) const {
+        const TypeInfo& info = types_.get(type);
+        uint64_t bits = 0;
+        PlatformNativeException fault;
+        if (!platform_read_memory(address, &bits, info.size, &fault)) throw NativeFault(fault);
+        return normalize_bits(bits, type);
+    }
+
+    uint64_t read_scalar_field(const void* aggregate, TypeId type, const char* name) const {
+        const TypeField& field = require_field(type, name);
+        return read_scalar_bytes(static_cast<const std::byte*>(aggregate) + field.offset, field.type);
+    }
+
+    void write_scalar_field(void* aggregate, TypeId type, const char* name, uint64_t bits) {
+        const TypeField& field = require_field(type, name);
+        const TypeInfo& info = types_.get(field.type);
+        bits = mask_width(bits, info.size);
+        std::memcpy(static_cast<std::byte*>(aggregate) + field.offset, &bits, info.size);
+    }
+
+    RuntimeValue make_native_exception_value(const PlatformNativeException& snapshot) {
+        const TypeId exception_type = types_.lookup_builtin("NATIVE_EXCEPTION");
+        const TypeId record_type = types_.lookup_builtin("EXCEPTION_RECORD");
+        const TypeId context_type = types_.lookup_builtin("CONTEXT");
+        const TypeInfo& exception_info = types_.get(exception_type);
+        const TypeInfo& record_info = types_.get(record_type);
+        const TypeInfo& context_info = types_.get(context_type);
+        if (context_info.size != sizeof(PlatformContextX64)) throw std::runtime_error("CONTEXT mirror layout mismatch");
+
+        void* memory = arena_.allocate(exception_info.size, exception_info.alignment);
+        std::memset(memory, 0, exception_info.size);
+        void* root_record = field_address(memory, exception_type, "record");
+
+        void* records[PLATFORM_EXCEPTION_MAX_RECORDS]{};
+        const uint32_t count = std::min(snapshot.record_count, PLATFORM_EXCEPTION_MAX_RECORDS);
+        if (count) records[0] = root_record;
+        for (uint32_t i = 1; i < count; ++i) {
+            records[i] = runtime_.allocate_persistent(record_info.size, record_info.alignment);
+            std::memset(records[i], 0, record_info.size);
+        }
+
+        const TypeField& information_field = require_field(record_type, "ExceptionInformation");
+        const TypeInfo& information_type = types_.get(information_field.type);
+        for (uint32_t i = 0; i < count; ++i) {
+            const PlatformExceptionRecord& source = snapshot.records[i];
+            void* destination = records[i];
+            write_scalar_field(destination, record_type, "ExceptionCode", source.ExceptionCode);
+            write_scalar_field(destination, record_type, "ExceptionFlags", source.ExceptionFlags);
+            write_scalar_field(destination, record_type, "ExceptionRecord",
+                               i + 1 < count ? reinterpret_cast<uint64_t>(records[i + 1]) : 0);
+            write_scalar_field(destination, record_type, "ExceptionAddress", source.ExceptionAddress);
+            write_scalar_field(destination, record_type, "NumberParameters", source.NumberParameters);
+            std::memcpy(static_cast<std::byte*>(destination) + information_field.offset,
+                        source.ExceptionInformation, std::min<size_t>(information_type.size, sizeof(source.ExceptionInformation)));
+        }
+
+        void* context = field_address(memory, exception_type, "context");
+        std::memcpy(context, &snapshot.context, sizeof(snapshot.context));
+        write_scalar_field(memory, exception_type, "thread_id", snapshot.thread_id);
+        write_scalar_field(memory, exception_type, "stack_recovered", snapshot.stack_recovered ? 1 : 0);
+        write_scalar_field(memory, exception_type, "record_count", count);
+        write_scalar_field(memory, exception_type, "record_chain_truncated", snapshot.record_chain_truncated ? 1 : 0);
+        return {exception_type, 0, memory};
+    }
+
+    PlatformNativeException snapshot_from_native_exception_value(RuntimeValue value) {
+        const TypeId exception_type = types_.lookup_builtin("NATIVE_EXCEPTION");
+        const TypeId record_type = types_.lookup_builtin("EXCEPTION_RECORD");
+        const TypeId context_type = types_.lookup_builtin("CONTEXT");
+        if (value.type != exception_type || !value.aggregate) throw std::runtime_error("throw value is not a NATIVE_EXCEPTION");
+        if (types_.get(context_type).size != sizeof(PlatformContextX64)) throw std::runtime_error("CONTEXT mirror layout mismatch");
+
+        PlatformNativeException snapshot;
+        snapshot.thread_id = static_cast<uint32_t>(read_scalar_field(value.aggregate, exception_type, "thread_id"));
+        snapshot.stack_recovered = read_scalar_field(value.aggregate, exception_type, "stack_recovered") != 0;
+        snapshot.record_chain_truncated = read_scalar_field(value.aggregate, exception_type, "record_chain_truncated") != 0;
+        const uint32_t requested_count = static_cast<uint32_t>(read_scalar_field(value.aggregate, exception_type, "record_count"));
+        snapshot.record_count = std::min(requested_count, PLATFORM_EXCEPTION_MAX_RECORDS);
+        if (requested_count > PLATFORM_EXCEPTION_MAX_RECORDS) snapshot.record_chain_truncated = true;
+
+        const TypeField& context_field = require_field(exception_type, "context");
+        PlatformNativeException context_fault;
+        if (!platform_read_memory(static_cast<const std::byte*>(value.aggregate) + context_field.offset,
+                                  &snapshot.context, sizeof(snapshot.context), &context_fault))
+            throw NativeFault(context_fault);
+
+        const TypeField& root_field = require_field(exception_type, "record");
+        const TypeField& information_field = require_field(record_type, "ExceptionInformation");
+        const TypeInfo& information_type = types_.get(information_field.type);
+        const void* record = static_cast<const std::byte*>(value.aggregate) + root_field.offset;
+        for (uint32_t i = 0; i < snapshot.record_count && record; ++i) {
+            PlatformExceptionRecord& destination = snapshot.records[i];
+            destination.ExceptionCode = static_cast<uint32_t>(read_scalar_field(record, record_type, "ExceptionCode"));
+            destination.ExceptionFlags = static_cast<uint32_t>(read_scalar_field(record, record_type, "ExceptionFlags"));
+            destination.ExceptionAddress = read_scalar_field(record, record_type, "ExceptionAddress");
+            destination.NumberParameters = std::min<uint32_t>(
+                static_cast<uint32_t>(read_scalar_field(record, record_type, "NumberParameters")), PLATFORM_EXCEPTION_MAX_PARAMETERS);
+            PlatformNativeException info_fault;
+            if (!platform_read_memory(static_cast<const std::byte*>(record) + information_field.offset,
+                                      destination.ExceptionInformation,
+                                      std::min<size_t>(information_type.size, sizeof(destination.ExceptionInformation)), &info_fault))
+                throw NativeFault(info_fault);
+            record = reinterpret_cast<const void*>(read_scalar_field(record, record_type, "ExceptionRecord"));
+        }
+        return snapshot;
+    }
 
     Binding* resolve_binding(const std::string& name) {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
@@ -125,11 +258,11 @@ private:
     }
 
     RuntimeValue load_place(const Place& place) {
-        if (!place.address) throw std::runtime_error("null place address");
         const TypeInfo& info = types_.get(place.type);
         if (types_.is_aggregate(place.type)) return RuntimeValue{place.type, 0, place.address};
         uint64_t bits = 0;
-        if (!platform_read_memory(place.address, &bits, info.size)) throw std::runtime_error("memory read failed");
+        PlatformNativeException fault;
+        if (!platform_read_memory(place.address, &bits, info.size, &fault)) throw NativeFault(fault);
         return RuntimeValue{place.type, normalize_bits(bits, place.type), nullptr};
     }
 
@@ -138,10 +271,12 @@ private:
         const TypeInfo& info = types_.get(place.type);
         if (types_.is_aggregate(place.type)) {
             if (!value.aggregate) throw std::runtime_error("aggregate value has no storage");
-            if (!platform_write_memory(place.address, value.aggregate, info.size)) throw std::runtime_error("memory write failed");
+            PlatformNativeException fault;
+            if (!platform_write_memory(place.address, value.aggregate, info.size, &fault)) throw NativeFault(fault);
         } else {
             const uint64_t bits = mask_width(value.bits, info.size);
-            if (!platform_write_memory(place.address, &bits, info.size)) throw std::runtime_error("memory write failed");
+            PlatformNativeException fault;
+            if (!platform_write_memory(place.address, &bits, info.size, &fault)) throw NativeFault(fault);
         }
     }
 
@@ -230,7 +365,6 @@ private:
             }
             case ExprKind::Deref: {
                 RuntimeValue address = eval(*expr.lhs);
-                if (address.bits == 0) throw DiagnosticError("null memory address", expr.span);
                 return {materialize_type(*expr.type), reinterpret_cast<void*>(address.bits), nullptr};
             }
             default: break;
@@ -339,13 +473,21 @@ private:
         }
 
         const uint64_t x = a.bits, y = b.bits;
+        const int64_t sx = static_cast<int64_t>(x), sy = static_cast<int64_t>(y);
         uint64_t r = 0;
         switch (expr.op) {
             case TokenKind::Plus: r = x + y; break;
             case TokenKind::Minus: r = x - y; break;
             case TokenKind::Star: r = x * y; break;
-            case TokenKind::Slash: r = y ? x / y : 0; break;
-            case TokenKind::Percent: r = y ? x % y : 0; break;
+            case TokenKind::Slash:
+                if (!sy) r = 0;
+                else if (sx == std::numeric_limits<int64_t>::min() && sy == -1) r = static_cast<uint64_t>(sx);
+                else r = static_cast<uint64_t>(sx / sy);
+                break;
+            case TokenKind::Percent:
+                if (!sy || (sx == std::numeric_limits<int64_t>::min() && sy == -1)) r = 0;
+                else r = static_cast<uint64_t>(sx % sy);
+                break;
             case TokenKind::Amp: r = x & y; break;
             case TokenKind::Pipe: r = x | y; break;
             case TokenKind::Caret: r = x ^ y; break;
@@ -382,7 +524,8 @@ private:
             const uint64_t count = cast(args[1], types_.primitive(PrimitiveKind::U64)).bits;
             for (uint64_t i = 0; i < count; ++i) {
                 uint8_t byte = 0;
-                if (!platform_read_memory(p + i, &byte, 1)) throw std::runtime_error("hex memory read failed");
+                PlatformNativeException fault;
+                if (!platform_read_memory(p + i, &byte, 1, &fault)) throw NativeFault(fault);
                 if (!runtime_.quiet()) std::printf("%02X%s", byte, ((i + 1) % 16 == 0 || i + 1 == count) ? "\n" : " ");
             }
             return {void_type, 0, nullptr};
@@ -404,6 +547,14 @@ private:
         }
         if (expr.checked_intrinsic_target) return intrinsic(expr, args);
 
+        if (expr.checked_script_target) {
+            auto slot = runtime_.function_slot(expr.target_name);
+            if (!slot) throw DiagnosticError("script function is not installed: '" + expr.target_name + "'", expr.span);
+            FunctionVersion* function = runtime_.function_version(*slot);
+            if (!function) throw DiagnosticError("script function has no installed version: '" + expr.target_name + "'", expr.span);
+            return runtime_.invoke(*function, args);
+        }
+
         void* target = nullptr;
         if (expr.call_target == CallTargetKind::Variable) {
             Binding* binding = resolve_binding(expr.target_name);
@@ -412,12 +563,7 @@ private:
         } else if (expr.call_target == CallTargetKind::External) {
             target = runtime_.dlls().resolve_external(expr.module_name, expr.target_name);
         } else {
-            if (expr.checked_script_target) {
-                target = runtime_.function_address(expr.target_name);
-                if (!target) throw DiagnosticError("script function is not installed: '" + expr.target_name + "'", expr.span);
-            } else {
-                target = runtime_.dlls().resolve_focused(expr.target_name);
-            }
+            target = runtime_.dlls().resolve_focused(expr.target_name);
         }
         const uint64_t result = ffi_call_scalar(target, types_, expr.checked_return_type, expr.checked_arg_types, bits);
         return {expr.checked_return_type, result, nullptr};
@@ -536,16 +682,10 @@ private:
                 if (echo_) print_value(value);
                 return {};
             }
-            case StmtKind::Block: {
-                scopes_.push_back({});
-                Flow flow = run(stmt.body);
-                scopes_.pop_back();
-                return flow;
-            }
+            case StmtKind::Block:
+                return run_scoped(stmt.body);
             case StmtKind::If: {
-                if (truthy(eval(*stmt.expr))) {
-                    scopes_.push_back({}); Flow flow = run(stmt.body); scopes_.pop_back(); return flow;
-                }
+                if (truthy(eval(*stmt.expr))) return run_scoped(stmt.body);
                 if (stmt.else_branch) return execute(*stmt.else_branch);
                 return {};
             }
@@ -568,25 +708,37 @@ private:
                     }
                     if (!matched) continue;
 
-                    scopes_.push_back({});
-                    Flow flow = run(arm.body);
-                    scopes_.pop_back();
-                    return flow;
+                    return run_scoped(arm.body);
                 }
 
-                if (default_arm) {
-                    scopes_.push_back({});
-                    Flow flow = run(default_arm->body);
-                    scopes_.pop_back();
-                    return flow;
-                }
+                if (default_arm) return run_scoped(default_arm->body);
                 return {};
+            }
+            case StmtKind::Try: {
+                try {
+                    return run_scoped(stmt.body);
+                } catch (const NativeFault& fault) {
+                    RuntimeValue exception = make_native_exception_value(fault.snapshot());
+                    scopes_.push_back({});
+                    try {
+                        Binding* binding = create_local(stmt.catch_name, exception.type);
+                        store_binding(*binding, exception);
+                        Flow flow = run(stmt.catch_body);
+                        scopes_.pop_back();
+                        return flow;
+                    } catch (...) {
+                        scopes_.pop_back();
+                        throw;
+                    }
+                }
+            }
+            case StmtKind::Throw: {
+                RuntimeValue exception = eval(*stmt.expr);
+                throw NativeFault(snapshot_from_native_exception_value(exception));
             }
             case StmtKind::While: {
                 while (truthy(eval(*stmt.expr))) {
-                    scopes_.push_back({});
-                    Flow flow = run(stmt.body);
-                    scopes_.pop_back();
+                    Flow flow = run_scoped(stmt.body);
                     if (flow.kind == FlowKind::Break) break;
                     if (flow.kind == FlowKind::Continue) continue;
                     if (flow.kind == FlowKind::Return) return flow;

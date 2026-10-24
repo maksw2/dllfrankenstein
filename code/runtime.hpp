@@ -94,6 +94,7 @@ public:
 
     Binding* find_global(const std::string& name) const;
     Binding* define_or_redefine_global(const std::string& name, TypeId type);
+    void* allocate_persistent(size_t size, size_t alignment);
 
     void install_function(const std::shared_ptr<Module>& module, Stmt& declaration);
     void* function_address(const std::string& name) const;

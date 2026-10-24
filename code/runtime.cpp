@@ -185,6 +185,11 @@ Binding* Runtime::define_or_redefine_global(const std::string& name, TypeId type
     return raw;
 }
 
+void* Runtime::allocate_persistent(size_t size, size_t alignment) {
+    std::scoped_lock lock(metadata_mutex_);
+    return global_arena_.allocate(size, alignment);
+}
+
 void Runtime::install_function(const std::shared_ptr<Module>& module, Stmt& declaration) {
     auto version = std::make_unique<FunctionVersion>();
     version->signature.return_type = declaration.checked_return_type;

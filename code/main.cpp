@@ -46,6 +46,32 @@ void print_warnings(const std::string& source_name, const std::vector<Warning>& 
         std::fprintf(stderr, "%s:%u:%u: warning: %s\n", source_name.c_str(), warning.span.line, warning.span.column, warning.message.c_str());
 }
 
+const char* native_exception_reason(uint32_t code) {
+    switch (code) {
+        case 0xC0000005u: return "Access Violation";
+        case 0xC00000FDu: return "Stack Overflow";
+        case 0xC000001Du: return "Illegal Instruction";
+        case 0xC0000096u: return "Privileged Instruction";
+        case 0xC0000094u: return "Integer Divide by Zero";
+        case 0xC0000095u: return "Integer Overflow";
+        case 0xC000008Eu: return "Floating Point Divide by Zero";
+        case 0x80000003u: return "Breakpoint";
+        default: return "Native Exception";
+    }
+}
+
+void print_native_fault(const NativeFault& fault) {
+    const PlatformNativeException& exception = fault.snapshot();
+    const PlatformExceptionRecord* record = exception.record_count ? &exception.records[0] : nullptr;
+    const uint32_t code = record ? record->ExceptionCode : 0;
+    const unsigned long long address = record ? static_cast<unsigned long long>(record->ExceptionAddress) : 0;
+
+    std::fputs("\nException thrown!\n", stderr);
+    std::fprintf(stderr, "Exception Code: 0x%08X\n", code);
+    std::fprintf(stderr, "Reason: %s\n", native_exception_reason(code));
+    std::fprintf(stderr, "Address: 0x%llX\n", address);
+}
+
 void check_only(const std::string& source, const std::string& name) {
     auto module = parse_module(source, name);
     TypeRegistry types;
@@ -87,6 +113,11 @@ void repl(bool quiet) {
             incomplete = true;
         } catch (const DiagnosticError& e) {
             print_diagnostic(name, buffer, e);
+            buffer.clear();
+            incomplete = false;
+            ++chunk;
+        } catch (const NativeFault& fault) {
+            print_native_fault(fault);
             buffer.clear();
             incomplete = false;
             ++chunk;
@@ -238,6 +269,23 @@ CONTROL FLOW
   break and continue are valid only inside while.
   return is valid only inside a function.
 
+EXCEPTIONS
+  try {
+      dangerous()
+  }
+  catch ($e) {
+      $code = $e.record.ExceptionCode
+      $rip = $e.context.Rip
+  }
+  throw $e - rethrow a caught NATIVE_EXCEPTION
+
+  Native SEH faults from FFI calls and typed memory access unwind to the nearest catch.
+  $e is a NATIVE_EXCEPTION containing a copied EXCEPTION_RECORD chain and x64 CONTEXT.
+  $e.record.ExceptionRecord points to the next copied EXCEPTION_RECORD when present.
+  $e.record_count and $e.record_chain_truncated describe the copied record chain.
+  $e.thread_id identifies the faulting thread; $e.stack_recovered reports stack-overflow recovery.
+  Uncaught native exceptions keep the normal runtime-error behavior.
+
 OPERATORS
   unary - - ! ~ &
   arithmetic - + - * / %
@@ -330,6 +378,9 @@ int main(int argc, char** argv) {
         return 0;
     } catch (const DiagnosticError& e) {
         std::fprintf(stderr, "error: %s (line %u, column %u)\n", e.what(), e.span.line, e.span.column);
+        return 1;
+    } catch (const NativeFault& fault) {
+        print_native_fault(fault);
         return 1;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

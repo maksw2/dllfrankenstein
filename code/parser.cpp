@@ -205,6 +205,24 @@ private:
         return stmt;
     }
 
+    std::unique_ptr<Stmt> parse_try_statement() {
+        const SourceSpan start = tokens_[pos_ - 1].span;
+        auto stmt = std::make_unique<Stmt>();
+        stmt->kind = StmtKind::Try;
+
+        auto guarded = parse_block();
+        stmt->body = std::move(guarded->body);
+        if (!match_keyword("catch")) fail("expected 'catch' after try block");
+        consume(TokenKind::LParen, "expected '(' after catch");
+        const Token& variable = consume(TokenKind::Variable, "expected catch variable");
+        stmt->catch_name = variable.text;
+        consume(TokenKind::RParen, "expected ')' after catch variable");
+        auto handler = parse_block();
+        stmt->catch_body = std::move(handler->body);
+        stmt->span = merge_spans(start, handler->span);
+        return stmt;
+    }
+
     std::unique_ptr<Stmt> parse_switch_statement() {
         const SourceSpan start = tokens_[pos_ - 1].span;
         auto stmt = std::make_unique<Stmt>();
@@ -275,6 +293,7 @@ private:
         }
 
         if (match_keyword("switch")) return parse_switch_statement();
+        if (match_keyword("try")) return parse_try_statement();
 
         if (match_keyword("while")) {
             const SourceSpan start = tokens_[pos_ - 1].span;
@@ -286,6 +305,15 @@ private:
             auto block = parse_block();
             stmt->body = std::move(block->body);
             stmt->span = merge_spans(start, block->span);
+            return stmt;
+        }
+
+        if (match_keyword("throw")) {
+            const SourceSpan start = tokens_[pos_ - 1].span;
+            auto stmt = std::make_unique<Stmt>();
+            stmt->kind = StmtKind::Throw;
+            stmt->expr = parse_expression();
+            stmt->span = merge_spans(start, stmt->expr->span);
             return stmt;
         }
 
@@ -317,6 +345,9 @@ private:
 
         if (keyword("case")) fail("'case' is only allowed directly inside switch");
         if (keyword("default")) fail("'default' is only allowed directly inside switch");
+        if (keyword("catch")) fail("'catch' must immediately follow a try block");
+        if (at(TokenKind::Identifier) && at(TokenKind::LBrace, 1))
+            fail("unknown statement or type '" + peek().text + "'", peek().span);
 
         // Assignment gets priority at statement position. This is what lets places be
         // lvalues without making arbitrary expression statements legal.
@@ -511,7 +542,9 @@ private:
 
     bool looks_like_typed_argument() const {
         if (!at(TokenKind::Identifier)) return false;
-        if (at(TokenKind::LParen, 1) || at(TokenKind::LBrace, 1) || at(TokenKind::Dot, 1)) return false;
+        if (at(TokenKind::At, 1)) return true;
+        if (at(TokenKind::LParen, 1) && !is_builtin_type_name(peek().text)) return false;
+        if (at(TokenKind::LBrace, 1) || at(TokenKind::Dot, 1)) return false;
         return starts_expression(peek(1));
     }
 
@@ -522,9 +555,15 @@ private:
             CallArg arg;
             arg.explicitly_typed = typed;
             const SourceSpan start = peek().span;
-            if (typed) arg.type = parse_type_syntax(false);
-            else if (looks_like_typed_argument()) fail("cannot mix typed and untyped call arguments");
-            arg.value = parse_expression();
+            if (typed && looks_like_typed_memory_access_start()) {
+                // T @address is already self-typed: T is both the memory access type
+                // and the ABI argument type.
+                arg.value = parse_expression();
+            } else {
+                if (typed) arg.type = parse_type_syntax(false);
+                else if (looks_like_typed_argument()) fail("cannot mix typed and untyped call arguments");
+                arg.value = parse_expression();
+            }
             arg.span = merge_spans(start, arg.value->span);
             call.args.push_back(std::move(arg));
             if (!match(TokenKind::Comma)) break;

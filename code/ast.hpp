@@ -112,6 +112,8 @@ enum class StmtKind {
     If,
     Switch,
     While,
+    Try,
+    Throw,
     Break,
     Continue,
     Return,
@@ -150,6 +152,8 @@ struct Stmt {
     std::vector<std::unique_ptr<Stmt>> body;
     std::unique_ptr<Stmt> else_branch;
     std::vector<SwitchArm> switch_arms;
+    std::string catch_name;
+    std::vector<std::unique_ptr<Stmt>> catch_body;
 
     // Named aggregate definition.
     std::string name;
