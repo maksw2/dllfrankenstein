@@ -1,9 +1,8 @@
-# dllfrankenstein – call any DLL function anytime anywhere, rundll32's evil, competent cousin
+# dllfrankenstein
 
-A raw, unapologetic bridge between man and machine.  
-Manually load DLLs, manipulate memory, and invoke native functions.  
+Call any DLL function anytime anywhere  
+rundll32's evil, competent cousin  
 With great power comes great segfaults.  
-scary shit
 
 ## how 2 use it
 
@@ -202,50 +201,6 @@ because tf2 reads from GetCommandLineA and not from lpCmdLine we have to pass pa
 idiots.
 
 ![alt text](readme-images/image-6.png)
-
-</details>
-
-<details>
-<summary><b>having fun with memory</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> $a = msvcrt.dll ptr malloc(u64 128)
-> assert($a)
-> i32 @$a = 67
-> i32 @($a + 4) = 420
-> $first = i32 @$a
-> $second = i32 @($a + 4)
-> hex($a, 8)
-> msvcrt.dll void free(ptr $a)
-> $b = malloc(128)
-> assert($b)
-> msvcrt.dll ptr strcpy(ptr $b, str "hello, world!")
-> hex($b, 16)
-> free($b)
-> quit()
-```
-
-remember to memset your memory kids!
-
-</details>
-
-<details>
-<summary><b>assertions</b></summary>
-
-```
-C:\Users\Administrator\Documents\dllfrankenstein>invoke.exe --interactive
-wilczurski's cool shit - repl
-Enter command or /quit to exit.
-> $result = test.dll i32 Add(i32 0, i32 0)
-> assert($result == 0)
-> $result = Add(9, 10)
-> assert($result == 19)
-> assert(Add(20, 22) == 42, "math broke")
-> quit()
-```
 
 </details>
 
